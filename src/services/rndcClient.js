@@ -387,8 +387,7 @@ class RNDCClient {
         .replace(/&lt;/g, "<")
         .replace(/&gt;/g, ">")
         .replace(/&quot;/g, '"')
-        .replace(/&apos;/g, "'")
-        .replace(/&amp;/g, "&");
+        .replace(/&apos;/g, "'");
 
       const innerResult = await parser.parseStringPromise(decodedXML);
       const root = innerResult.root;
