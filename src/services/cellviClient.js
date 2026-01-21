@@ -34,7 +34,7 @@ class CellviClient {
       },
       onRetry: (retryCount, error, requestConfig) => {
         logger.warn(
-          `Reintentando Cellvi API (${retryCount}/3): ${error.message}`
+          `Reintentando Cellvi API (${retryCount}/3): ${error.message}`,
         );
       },
     });
@@ -56,7 +56,7 @@ class CellviClient {
       },
       (error) => {
         return Promise.reject(error);
-      }
+      },
     );
 
     // Interceptor para manejar respuestas 401 (token expirado)
@@ -79,7 +79,7 @@ class CellviClient {
         }
 
         return Promise.reject(error);
-      }
+      },
     );
   }
 
@@ -99,7 +99,7 @@ class CellviClient {
         {
           timeout: 30000,
           headers: { "Content-Type": "application/json" },
-        }
+        },
       );
 
       // Extraer token de la respuesta
@@ -162,10 +162,22 @@ class CellviClient {
       logger.debug("Consultando vehículos del usuario");
 
       const response = await this.axiosInstance.get(
-        "/cellvi/movil/v3/vehiculos/usuario"
+        "/cellvi/movil/v3/vehiculos/usuario",
       );
 
-      const vehiculos = response.data || [];
+      let vehiculos = response.data;
+
+      if (!Array.isArray(vehiculos)) {
+        // En algunos casos la API devuelve { data: [...] } o estructura diferente
+        if (vehiculos && Array.isArray(vehiculos.data)) {
+          vehiculos = vehiculos.data;
+        } else {
+          logger.warn(
+            `Respuesta inesperada de vehículos (no es array): ${typeof vehiculos}`,
+          );
+          return [];
+        }
+      }
       logger.debug(`✅ ${vehiculos.length} vehículos obtenidos`);
 
       return vehiculos;
@@ -185,7 +197,7 @@ class CellviClient {
       logger.debug(`Consultando posición del vehículo ID: ${vehiculoId}`);
 
       const response = await this.axiosInstance.get(
-        `/cellvi/vehiculo/v2/${vehiculoId}/get_last_position`
+        `/cellvi/vehiculo/v2/${vehiculoId}/get_last_position`,
       );
 
       const posicion = response.data;
@@ -203,7 +215,7 @@ class CellviClient {
       };
     } catch (error) {
       logger.error(
-        `Error consultando posición vehículo ${vehiculoId}: ${error.message}`
+        `Error consultando posición vehículo ${vehiculoId}: ${error.message}`,
       );
       return null;
     }
@@ -219,7 +231,7 @@ class CellviClient {
 
       const vehiculos = await this.getVehiculosUsuario();
       const vehiculo = vehiculos.find(
-        (v) => v.placa.toUpperCase() === placa.toUpperCase()
+        (v) => v.placa.toUpperCase() === placa.toUpperCase(),
       );
 
       if (vehiculo) {
@@ -245,7 +257,7 @@ class CellviClient {
       logger.debug(`Consultando vehículo detallado: ${placa}`);
 
       const response = await this.axiosInstance.get(
-        `/cellvi/vehiculo/filter/${placa.toUpperCase()}/list`
+        `/cellvi/vehiculo/filter/${placa.toUpperCase()}/list`,
       );
 
       const vehiculos = response.data || [];
@@ -261,7 +273,7 @@ class CellviClient {
       logger.debug(
         `✅ Vehículo ${placa}: ${
           vehiculo.vehiculo_monitoreado ? "MONITOREADO" : "NO MONITOREADO"
-        }`
+        }`,
       );
 
       return {
@@ -282,7 +294,7 @@ class CellviClient {
       }
 
       logger.error(
-        `Error consultando vehículo detallado ${placa}: ${error.message}`
+        `Error consultando vehículo detallado ${placa}: ${error.message}`,
       );
       return null;
     }
@@ -310,7 +322,7 @@ class CellviClient {
       return posicion;
     } catch (error) {
       logger.error(
-        `Error consultando posición por placa ${placa}: ${error.message}`
+        `Error consultando posición por placa ${placa}: ${error.message}`,
       );
       return null;
     }

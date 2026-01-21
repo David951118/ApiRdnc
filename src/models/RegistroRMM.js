@@ -72,6 +72,44 @@ const registroRMMSchema = new mongoose.Schema(
       default: false,
     },
 
+    // Control de ventana de monitoreo
+    fechaCita: {
+      type: Date,
+      comment: "Fecha/hora de la cita del punto de control",
+    },
+    tiempoPactado: {
+      type: Number,
+      default: 0,
+      comment: "Tiempo pactado en minutos en el punto de control",
+    },
+    ventanaInicioMonitoreo: {
+      type: Date,
+      comment: "fechaCita - 2 horas",
+    },
+    ventanaFinMonitoreo: {
+      type: Date,
+      comment: "fechaCita + 24 horas",
+    },
+
+    // Detección automática
+    detectadoLlegada: {
+      type: Boolean,
+      default: false,
+    },
+    detectadoSalida: {
+      type: Boolean,
+      default: false,
+    },
+    momentoDeteccionLlegada: Date,
+    momentoDeteccionSalida: Date,
+
+    // Salida estimada (si no se detecta salida real)
+    salidaEstimada: {
+      type: Boolean,
+      default: false,
+      comment: "True si la salida fue calculada automáticamente",
+    },
+
     // Estado del reporte
     estado: {
       type: String,
@@ -102,7 +140,7 @@ const registroRMMSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // Índices compuestos

@@ -42,7 +42,7 @@ async function syncManifiestos(mockResponse = null) {
     logger.debug("Fetching vehicles assigned to RNDC user...");
     const vehiculosAsignados = await cellviClient.getVehiculosUsuario();
     const placasAsignadas = new Set(
-      vehiculosAsignados.map((v) => v.placa.toUpperCase())
+      vehiculosAsignados.map((v) => v.placa.toUpperCase()),
     );
     logger.debug(`Assigned vehicles found: ${placasAsignadas.size}`);
 
@@ -85,7 +85,7 @@ async function syncManifiestos(mockResponse = null) {
       await Configuracion.findOneAndUpdate(
         { clave: "ultima_consulta_todos" },
         { valor: ahora },
-        { upsert: true }
+        { upsert: true },
       );
       logger.debug("'todos' timestamp updated.");
     }
@@ -109,13 +109,14 @@ async function syncManifiestos(mockResponse = null) {
       try {
         const resultado = await procesarManifiesto(doc, placasAsignadas, stats);
 
-        if (resultado.upserted) {
+        // Safe access to resultado properties
+        if (resultado && resultado.upserted) {
           stats.nuevos++;
-        } else {
+        } else if (resultado) {
           stats.actualizados++;
         }
 
-        if (resultado.esMonitoreable) {
+        if (resultado && resultado.esMonitoreable) {
           stats.monitoreables++;
         } else {
           stats.noMonitoreables++;
@@ -172,11 +173,11 @@ async function procesarManifiesto(doc, placasAsignadas, stats) {
     if (vehiculoGlobal) {
       // Exist in platform. Attempt Auto-Assign.
       logger.info(
-        `Auto-Assigning vehicle ${placa} (ID: ${vehiculoGlobal.id}) to RNDC user...`
+        `Auto-Assigning vehicle ${placa} (ID: ${vehiculoGlobal.id}) to RNDC user...`,
       );
 
       const asignacion = await cellviAdminClient.asignarVehiculo(
-        vehiculoGlobal.id
+        vehiculoGlobal.id,
       );
 
       if (asignacion.success) {
@@ -214,7 +215,7 @@ async function procesarManifiesto(doc, placasAsignadas, stats) {
       const duplicados = puntos.length - puntosLimpios.length;
       stats.puntosDuplicados += duplicados;
       logger.debug(
-        `Manifest ${numManifiesto}: ${duplicados} duplicate points removed`
+        `Manifest ${numManifiesto}: ${duplicados} duplicate points removed`,
       );
     }
 
@@ -248,20 +249,20 @@ async function procesarManifiesto(doc, placasAsignadas, stats) {
       puntosControl,
       datosOriginales: doc,
     },
-    { upsert: true, new: true, rawResult: true }
+    { upsert: true, new: true, rawResult: true },
   );
 
-  const accion = resultado.lastErrorObject.upserted ? "New" : "Updated";
+  const accion = resultado.lastErrorObject?.upserted ? "New" : "Updated";
   const monitoreo = esMonitoreable
     ? "MONITORABLE"
     : `NOT MONITORABLE (${motivoNoMonitoreable})`;
 
   logger.info(
-    `${accion}: ${numManifiesto} (${placa}) - ${puntosControl.length} points - ${monitoreo}`
+    `${accion}: ${numManifiesto} (${placa}) - ${puntosControl.length} points - ${monitoreo}`,
   );
 
   return {
-    ...resultado.lastErrorObject,
+    ...(resultado.lastErrorObject || {}),
     esMonitoreable,
   };
 }
@@ -281,7 +282,7 @@ function eliminarPuntosDuplicados(puntos) {
 
   // Convert to array and sort by code
   return Array.from(puntosMap.values()).sort(
-    (a, b) => parseInt(a.codpuntocontrol) - parseInt(b.codpuntocontrol)
+    (a, b) => parseInt(a.codpuntocontrol) - parseInt(b.codpuntocontrol),
   );
 }
 

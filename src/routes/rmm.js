@@ -12,8 +12,33 @@ router.get("/", async (req, res) => {
 
     const filter = {};
 
+    // Filtro de seguridad: Restringir a vehículos asignados si no es admin
+    if (req.user && req.user.roles && !req.user.roles.includes("ROLE_ADMIN")) {
+      if (req.session && req.session.vehiculosPermitidos) {
+        const placasPermitidas = req.session.vehiculosPermitidos.map((v) =>
+          v.placa.toUpperCase(),
+        );
+        filter.numPlaca = { $in: placasPermitidas };
+      }
+    }
+
     if (estado) filter.estado = estado;
-    if (placa) filter.numPlaca = new RegExp(placa, "i");
+
+    // Si se busca por placa específica
+    if (placa) {
+      const regex = new RegExp(placa, "i");
+
+      if (filter.numPlaca) {
+        // Si ya hay restricción, combinar con AND
+        filter.$and = [
+          { numPlaca: filter.numPlaca }, // Filtro de permisos
+          { numPlaca: regex }, // Filtro de búsqueda
+        ];
+        delete filter.numPlaca; // Eliminar la clave original para evitar conflictos
+      } else {
+        filter.numPlaca = regex;
+      }
+    }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
@@ -50,18 +75,39 @@ router.get("/", async (req, res) => {
  */
 router.get("/estadisticas", async (req, res) => {
   try {
-    const total = await RegistroRMM.countDocuments();
+    // Construir filtro base según permisos del usuario
+    let baseFilter = {};
+
+    if (req.user && req.user.roles && !req.user.roles.includes("ROLE_ADMIN")) {
+      if (req.session && req.session.vehiculosPermitidos) {
+        const placasPermitidas = req.session.vehiculosPermitidos.map((v) =>
+          v.placa.toUpperCase(),
+        );
+        baseFilter.numPlaca = { $in: placasPermitidas };
+      }
+    }
+
+    const total = await RegistroRMM.countDocuments(baseFilter);
     const pendientes = await RegistroRMM.countDocuments({
+      ...baseFilter,
       estado: "pendiente",
     });
     const reportados = await RegistroRMM.countDocuments({
+      ...baseFilter,
       estado: "reportado",
     });
-    const errores = await RegistroRMM.countDocuments({ estado: "error" });
-    const vencidos = await RegistroRMM.countDocuments({ estado: "vencido" });
+    const errores = await RegistroRMM.countDocuments({
+      ...baseFilter,
+      estado: "error",
+    });
+    const vencidos = await RegistroRMM.countDocuments({
+      ...baseFilter,
+      estado: "vencido",
+    });
 
     // RMMs por placa
     const porPlaca = await RegistroRMM.aggregate([
+      { $match: baseFilter }, // Aplicar filtro base
       {
         $group: {
           _id: "$numPlaca",

@@ -54,7 +54,7 @@ async function reportRMM() {
       },
       {
         $set: { estado: "vencido" },
-      }
+      },
     );
 
     if (resultado.modifiedCount > 0) {
@@ -88,23 +88,64 @@ async function reportarRMM(rmm, client, nitGPS) {
       horallegada: rmm.horaLlegada,
     };
 
-    // Add departure details if available
-    if (rmm.sinSalida) {
-      datos.sinsalida = "S";
-    } else if (rmm.fechaSalida && rmm.horaSalida) {
+    // Lógica de salida mejorada según manual RNDC
+    if (rmm.fechaSalida && rmm.horaSalida) {
+      // Tiene datos de salida reales - incluirlos
       datos.fechasalida = rmm.fechaSalida;
       datos.horasalida = rmm.horaSalida;
 
-      // If departure, use departure coordinates if available, otherwise fallback to arrival
+      // Si tiene coordenadas de salida, usarlas
       if (rmm.latitudSalida && rmm.longitudSalida) {
         datos.latitud = rmm.latitudSalida;
         datos.longitud = rmm.longitudSalida;
+      }
+    } else {
+      // NO tiene datos de salida - estimar salida usando tiempo pactado
+      // Según manual RNDC: se debe reportar llegada Y salida
+
+      if (rmm.tiempoPactado && rmm.tiempoPactado > 0) {
+        // Calcular salida estimada: llegada + tiempo pactado
+        const salida = calcularSalidaEstimada(
+          rmm.fechaLlegada,
+          rmm.horaLlegada,
+          rmm.tiempoPactado,
+        );
+
+        datos.fechasalida = salida.fecha;
+        datos.horasalida = salida.hora;
+
+        // Marcar como salida estimada
+        rmm.salidaEstimada = true;
+        rmm.fechaSalida = salida.fecha;
+        rmm.horaSalida = salida.hora;
+
+        logger.info(
+          `Salida estimada para ${rmm.ingresoidManifiesto}-${rmm.codigoPuntoControl}: ${salida.fecha} ${salida.hora}`,
+        );
+      } else {
+        // Sin tiempo pactado - usar salida inmediata (1 minuto después)
+        const salida = calcularSalidaEstimada(
+          rmm.fechaLlegada,
+          rmm.horaLlegada,
+          1,
+        );
+
+        datos.fechasalida = salida.fecha;
+        datos.horasalida = salida.hora;
+
+        rmm.salidaEstimada = true;
+        rmm.fechaSalida = salida.fecha;
+        rmm.horaSalida = salida.hora;
+
+        logger.warn(
+          `Sin tiempo pactado - salida inmediata para ${rmm.ingresoidManifiesto}-${rmm.codigoPuntoControl}`,
+        );
       }
     }
 
     // Send to RNDC
     logger.info(
-      `Sending RMM: ${rmm.ingresoidManifiesto} - Point ${rmm.codigoPuntoControl}`
+      `Sending RMM: ${rmm.ingresoidManifiesto} - Point ${rmm.codigoPuntoControl}`,
     );
 
     const response = await client.registrarRMM(datos);
@@ -123,7 +164,7 @@ async function reportarRMM(rmm, client, nitGPS) {
         },
         {
           $set: { "puntosControl.$.radicadoRNDC": response.radicado },
-        }
+        },
       );
 
       logger.info(`RMM reported successfully - Ref: ${response.radicado}`);
@@ -141,6 +182,64 @@ async function reportarRMM(rmm, client, nitGPS) {
     await rmm.save();
 
     logger.error(`Exception reporting RMM: ${error.message}`);
+  }
+}
+
+/**
+ * Calcular salida estimada basada en llegada + tiempo pactado
+ * @param {string} fechaLlegada - Formato DD/MM/YYYY
+ * @param {string} horaLlegada - Formato HH:MM
+ * @param {number} tiempoPactadoMinutos - Minutos de tiempo pactado
+ * @returns {Object} { fecha, hora } en formato RNDC
+ */
+function calcularSalidaEstimada(
+  fechaLlegada,
+  horaLlegada,
+  tiempoPactadoMinutos,
+) {
+  try {
+    // Parsear fecha y hora de llegada
+    const [dia, mes, anio] = fechaLlegada.split("/");
+    const [hora, minuto] = horaLlegada.split(":");
+
+    // Crear objeto Date
+    const llegada = new Date(
+      parseInt(anio),
+      parseInt(mes) - 1,
+      parseInt(dia),
+      parseInt(hora),
+      parseInt(minuto),
+    );
+
+    // Sumar tiempo pactado
+    const salida = new Date(
+      llegada.getTime() + tiempoPactadoMinutos * 60 * 1000,
+    );
+
+    // Formatear de vuelta a formato RNDC
+    const fechaSalida =
+      String(salida.getDate()).padStart(2, "0") +
+      "/" +
+      String(salida.getMonth() + 1).padStart(2, "0") +
+      "/" +
+      salida.getFullYear();
+
+    const horaSalida =
+      String(salida.getHours()).padStart(2, "0") +
+      ":" +
+      String(salida.getMinutes()).padStart(2, "0");
+
+    return {
+      fecha: fechaSalida,
+      hora: horaSalida,
+    };
+  } catch (error) {
+    logger.error(`Error calculando salida estimada: ${error.message}`);
+    // Retornar misma fecha/hora de llegada como fallback
+    return {
+      fecha: fechaLlegada,
+      hora: horaLlegada,
+    };
   }
 }
 

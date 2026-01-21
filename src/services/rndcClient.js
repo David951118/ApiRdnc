@@ -36,7 +36,7 @@ class RNDCClient {
       },
       onRetry: (retryCount, error, requestConfig) => {
         logger.warn(
-          `Retrying RNDC request (${retryCount}/3): ${error.message} - ${error.code}`
+          `Retrying RNDC request (${retryCount}/3): ${error.message} - ${error.code}`,
         );
       },
     });
@@ -140,7 +140,7 @@ class RNDCClient {
         start,
         parsed,
         null,
-        { nitGPS, tipo }
+        { nitGPS, tipo },
       );
       return parsed;
     } catch (error) {
@@ -151,7 +151,7 @@ class RNDCClient {
         start,
         null,
         error,
-        { nitGPS, tipo }
+        { nitGPS, tipo },
       );
       return { success: false, error: error.message };
     }
@@ -184,7 +184,7 @@ class RNDCClient {
         start,
         parsed,
         null,
-        { nitGPS, ingresoidManifiesto }
+        { nitGPS, ingresoidManifiesto },
       );
       return parsed;
     } catch (error) {
@@ -198,7 +198,7 @@ class RNDCClient {
         {
           nitGPS,
           ingresoidManifiesto,
-        }
+        },
       );
       return { success: false, error: error.message };
     }
@@ -245,7 +245,7 @@ class RNDCClient {
 
     try {
       logger.info(
-        `Registering RMM: ${ingresoidmanifiesto} - Point ${codpuntocontrol}`
+        `Registering RMM: ${ingresoidmanifiesto} - Point ${codpuntocontrol}`,
       );
 
       const response = await this.axiosInstance.post(this.endpoint, soapXML, {
@@ -313,6 +313,64 @@ class RNDCClient {
       await this._logInteraction("anular_rmm", soapXML, start, null, error, {
         ingresoidrmm,
         ingresoidmanifiesto,
+      });
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Register RNMM (Registro de Novedades Monitoreo de Manifiesto)
+   * @param {Object} datos - RNMM Data
+   */
+  async registrarRNMM(datos) {
+    const {
+      numidgps,
+      ingresoidmanifiesto,
+      numplaca,
+      codpuntocontrol,
+      codnovedad,
+    } = datos;
+
+    const variables = `<numidgps>${numidgps}</numidgps>
+<ingresoidmanifiesto>${ingresoidmanifiesto}</ingresoidmanifiesto>
+<numplaca>${numplaca}</numplaca>
+<codpuntocontrol>${codpuntocontrol}</codpuntocontrol>
+<codnovedad>${codnovedad}</codnovedad>`;
+
+    const innerXML = this._buildRNDCXML(1, 46, variables);
+    const soapXML = this._buildSOAPEnvelope(innerXML);
+    const start = Date.now();
+
+    try {
+      logger.info(
+        `Registering RNMM: ${ingresoidmanifiesto} - Point ${codpuntocontrol} - Code ${codnovedad}`,
+      );
+
+      const response = await this.axiosInstance.post(this.endpoint, soapXML, {
+        timeout: this.axiosInstance.defaults.timeout,
+      });
+
+      const parsed = await this._parseResponse(response.data);
+      await this._logInteraction(
+        "registro_rnmm",
+        soapXML,
+        start,
+        parsed,
+        null,
+        {
+          ingresoidmanifiesto,
+          numplaca,
+          codpuntocontrol,
+          codnovedad,
+        },
+      );
+      return parsed;
+    } catch (error) {
+      logger.error(`Error registering RNMM: ${error.message}`);
+      await this._logInteraction("registro_rnmm", soapXML, start, null, error, {
+        ingresoidmanifiesto,
+        codpuntocontrol,
+        codnovedad,
       });
       return { success: false, error: error.message };
     }
@@ -387,9 +445,40 @@ class RNDCClient {
         .replace(/&lt;/g, "<")
         .replace(/&gt;/g, ">")
         .replace(/&quot;/g, '"')
-        .replace(/&apos;/g, "'");
+        .replace(/&apos;/g, "'")
+        .trim();
 
-      const innerResult = await parser.parseStringPromise(decodedXML);
+      // PARCHE PARA XML ROTO DEL RNDC (Error GPS200)
+      // El RNDC devuelve XML inválido cerrando tags no abiertos </puntoscontrol></documento>
+      if (
+        decodedXML.includes("</puntoscontrol>") &&
+        !decodedXML.includes("<puntoscontrol>")
+      ) {
+        logger.warn(
+          "Detectado XML mal formado del RNDC (fix automático aplicado)",
+        );
+        // Intentar extraer error con Regex directamente para evitar fallo del parser
+        const errorMatch = decodedXML.match(/<ErrorMSG>(.*?)<\/ErrorMSG>/i);
+        if (errorMatch && errorMatch[1]) {
+          logger.warn(`RNDC Error (Extracted): ${errorMatch[1]}`);
+          return { success: false, error: errorMatch[1] };
+        }
+      }
+
+      let innerResult;
+      try {
+        innerResult = await parser.parseStringPromise(decodedXML);
+      } catch (innerError) {
+        logger.error(`Error parsing inner XML. Content: ${decodedXML}`);
+        // Fallback final: intentar buscar errorMSG con regex si el parser falla
+        const fallbackMatch =
+          decodedXML.match(/<ErrorMSG>(.*?)<\/ErrorMSG>/i) ||
+          decodedXML.match(/<errormsg>(.*?)<\/errormsg>/i);
+        if (fallbackMatch && fallbackMatch[1]) {
+          return { success: false, error: fallbackMatch[1] };
+        }
+        throw innerError;
+      }
       const root = innerResult.root;
 
       if (root.errormsg || root.ErrorMSG) {
@@ -420,6 +509,12 @@ class RNDCClient {
       return { success: true, data: root };
     } catch (error) {
       logger.error(`Error parsing response: ${error.message}`);
+      // Loguear el contenido que falló para depuración
+      if (typeof xmlResponse === "string") {
+        logger.debug(
+          `Failed XML Response start: ${xmlResponse.substring(0, 200)}`,
+        );
+      }
       return { success: false, error: `Parsing error: ${error.message}` };
     }
   }

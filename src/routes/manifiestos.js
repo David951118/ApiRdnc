@@ -54,13 +54,13 @@ router.get("/", async (req, res) => {
     let filtro = {};
     // Si viene el parámetro placas, filtrar por ellas
     if (placas && placas.trim() !== "") {
-      const listaPlacas = placas.split(",").map(p => p.trim().toUpperCase());
+      const listaPlacas = placas.split(",").map((p) => p.trim().toUpperCase());
       filtro.placa = { $in: listaPlacas };
     }
     const manifiestos = await Manifiesto.find(filtro).sort({
       fechaExpedicion: -1,
     });
-    
+
     res.json(manifiestos);
   } catch (error) {
     logger.error(`Error obteniendo manifiestos: ${error.message}`);
@@ -73,21 +73,41 @@ router.get("/", async (req, res) => {
  */
 router.get("/estadisticas", async (req, res) => {
   try {
-    const total = await Manifiesto.countDocuments();
-    const activos = await Manifiesto.countDocuments({ estado: "activo" });
+    // Construir filtro base según permisos del usuario
+    let baseFilter = {};
+
+    // Si NO es admin, filtrar solo por sus vehículos asignados
+    // Asumimos que req.user y req.session existen gracias al middleware 'authenticate'
+    if (req.user && req.user.roles && !req.user.roles.includes("ROLE_ADMIN")) {
+      if (req.session && req.session.vehiculosPermitidos) {
+        const placasPermitidas = req.session.vehiculosPermitidos.map(
+          (v) => v.placa,
+        );
+        baseFilter.placa = { $in: placasPermitidas };
+      }
+    }
+
+    const total = await Manifiesto.countDocuments(baseFilter);
+    const activos = await Manifiesto.countDocuments({
+      ...baseFilter,
+      estado: "activo",
+    });
     const completados = await Manifiesto.countDocuments({
+      ...baseFilter,
       estado: "completado",
     });
     const monitoreables = await Manifiesto.countDocuments({
+      ...baseFilter,
       esMonitoreable: true,
     });
     const noMonitoreables = await Manifiesto.countDocuments({
+      ...baseFilter,
       esMonitoreable: false,
     });
 
     // Agrupar por motivo de no monitoreable
     const motivosNoMonitoreable = await Manifiesto.aggregate([
-      { $match: { esMonitoreable: false } },
+      { $match: { ...baseFilter, esMonitoreable: false } },
       {
         $group: {
           _id: "$motivoNoMonitoreable",
@@ -99,6 +119,7 @@ router.get("/estadisticas", async (req, res) => {
 
     // Manifiestos por placa
     const porPlaca = await Manifiesto.aggregate([
+      { $match: baseFilter }, // Aplicar filtro base primero
       {
         $group: {
           _id: "$placa",
@@ -191,7 +212,5 @@ router.delete("/:id", async (req, res) => {
     });
   }
 });
-
-
 
 module.exports = router;

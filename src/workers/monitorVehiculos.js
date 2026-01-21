@@ -4,13 +4,6 @@ const Manifiesto = require("../models/Manifiesto");
 const RegistroRMM = require("../models/RegistroRMM");
 const cellviClient = require("../services/cellviClient");
 const logger = require("../config/logger");
-const config = require("../config/env");
-
-/**
- * Worker: Vehicle Monitoring and Event Detection.
- * Schedule: Every 1 minute.
- * Optimization: Filters manifests to only monitor those within a relevant time window relative to their appointment.
- */
 
 let isRunning = false;
 
@@ -22,7 +15,7 @@ async function monitorVehiculos() {
   isRunning = true;
 
   try {
-    // Retrieve active and monitorable manifests
+    // Recuperar manifiestos activos y monitoreables
     const manifiestos = await Manifiesto.find({
       estado: "activo",
       esMonitoreable: true,
@@ -32,16 +25,16 @@ async function monitorVehiculos() {
       return;
     }
 
-    // Filter manifests with control points near the appointment time
+    // Filtrar manifiestos con puntos de control cerca de la hora de la cita
     const manifestosParaMonitorear = manifiestos.filter((m) =>
-      tieneAlgunPuntoCercaDeHoraCita(m)
+      tieneAlgunPuntoCercaDeHoraCita(m),
     );
 
     if (manifestosParaMonitorear.length === 0) {
       return;
     }
 
-    // Process each relevant manifest
+    // Procesar cada manifiesto relevante
     for (const manifiesto of manifestosParaMonitorear) {
       await monitorearManifiesto(manifiesto);
     }
@@ -53,8 +46,6 @@ async function monitorVehiculos() {
 }
 
 /**
- * Checks if any control point is within the monitoring window.
- * Window: 2 hours before appointment up to 24 hours after.
  * @param {Object} manifiesto
  * @returns {boolean}
  */
@@ -66,12 +57,12 @@ function tieneAlgunPuntoCercaDeHoraCita(manifiesto) {
       continue;
     }
 
-    // If no specific appointment date, monitor indefinitely
+    // Si no hay fecha de cita, monitorear indefinidamente
     if (!punto.fechaCita) {
       return true;
     }
 
-    // Construct UTC date to match backend storage and avoid timezone offsets
+    // Construir fecha UTC para coincidir con el almacenamiento del backend y evitar desvíos de zona horaria
     const [hora, minuto] = punto.horaCita.split(":");
     const baseDate = new Date(punto.fechaCita);
 
@@ -81,11 +72,11 @@ function tieneAlgunPuntoCercaDeHoraCita(manifiesto) {
       baseDate.getUTCDate(),
       parseInt(hora),
       parseInt(minuto),
-      0
+      0,
     );
 
     const ventanaInicio = new Date(
-      fechaHoraCita.getTime() - 2 * 60 * 60 * 1000
+      fechaHoraCita.getTime() - 2 * 60 * 60 * 1000,
     );
     const ventanaFin = new Date(fechaHoraCita.getTime() + 24 * 60 * 60 * 1000);
 
@@ -93,7 +84,7 @@ function tieneAlgunPuntoCercaDeHoraCita(manifiesto) {
       return true;
     }
 
-    // Continue monitoring if vehicle is currently at the point
+    // Continuar monitoreo si el vehículo está actualmente en el punto
     if (punto.estado === "en_punto") {
       return true;
     }
@@ -114,7 +105,7 @@ async function monitorearManifiesto(manifiesto) {
       return;
     }
 
-    // Check each control point
+    // Revisa cada punto de control
     for (const punto of manifiesto.puntosControl) {
       if (punto.estado === "completado") {
         continue;
@@ -143,9 +134,9 @@ async function monitorearManifiesto(manifiesto) {
       }
     }
 
-    // Check if manifest is fully completed
+    // Verificar si el manifiesto está completado
     const todosCompletados = manifiesto.puntosControl.every(
-      (p) => p.estado === "completado"
+      (p) => p.estado === "completado",
     );
 
     if (todosCompletados) {
@@ -155,14 +146,14 @@ async function monitorearManifiesto(manifiesto) {
     }
   } catch (error) {
     logger.error(
-      `Error monitoring manifest ${manifiesto.numManifiesto}: ${error.message}`
+      `Error monitoring manifest ${manifiesto.numManifiesto}: ${error.message}`,
     );
   }
 }
 
 async function procesarLlegada(manifiesto, punto, posicion) {
   logger.info(
-    `Arrival detected: ${manifiesto.placa} at Point ${punto.codigoPunto}`
+    `Arrival detected: ${manifiesto.placa} at Point ${punto.codigoPunto}`,
   );
 
   punto.estado = "en_punto";
@@ -170,8 +161,17 @@ async function procesarLlegada(manifiesto, punto, posicion) {
   punto.latitudLlegada = posicion.lat;
   punto.longitudLlegada = posicion.lng;
 
-  const fechaLimite = new Date();
-  fechaLimite.setHours(fechaLimite.getHours() + 72);
+  // Calcular fechas de ventana de monitoreo
+  const fechaCita = punto.fechaCita
+    ? new Date(punto.fechaCita)
+    : punto.fechaHoraLlegada;
+  const ventanaInicioMonitoreo = new Date(
+    fechaCita.getTime() - 2 * 60 * 60 * 1000,
+  ); // -2h
+  const ventanaFinMonitoreo = new Date(
+    fechaCita.getTime() + 24 * 60 * 60 * 1000,
+  ); // +24h
+  const fechaLimite = new Date(fechaCita.getTime() + 24 * 60 * 60 * 1000); // +24h para reporte
 
   const rmm = await RegistroRMM.create({
     manifiestoId: manifiesto._id,
@@ -181,8 +181,16 @@ async function procesarLlegada(manifiesto, punto, posicion) {
     codigoPuntoControl: punto.codigoPunto,
     latitudLlegada: posicion.lat,
     longitudLlegada: posicion.lng,
-    fechaLlegada: formatFecha(new Date()),
-    horaLlegada: formatHora(new Date()),
+    fechaLlegada: formatFecha(punto.fechaHoraLlegada),
+    horaLlegada: formatHora(punto.fechaHoraLlegada),
+    // Nuevos campos para ventana de monitoreo
+    fechaCita: fechaCita,
+    tiempoPactado: punto.tiempoPactado || 0,
+    ventanaInicioMonitoreo: ventanaInicioMonitoreo,
+    ventanaFinMonitoreo: ventanaFinMonitoreo,
+    detectadoLlegada: true,
+    momentoDeteccionLlegada: punto.fechaHoraLlegada,
+    // Control de estado
     estado: "pendiente",
     fechaLimiteReporte: fechaLimite,
     intentos: 0,
@@ -194,15 +202,18 @@ async function procesarLlegada(manifiesto, punto, posicion) {
 
 async function procesarSalida(manifiesto, punto, posicion) {
   logger.info(
-    `Departure detected: ${manifiesto.placa} from Point ${punto.codigoPunto}`
+    `Departure detected: ${manifiesto.placa} from Point ${punto.codigoPunto}`,
   );
 
-  // Update RMM with departure data and reset status to 'pendiente' to trigger re-send
+  // Actualizar RMM con datos de salida y restablecer estado a 'pendiente' para re-envío
+  const momentoSalida = new Date();
   await RegistroRMM.findByIdAndUpdate(punto.rmmId, {
     latitudSalida: posicion.lat,
     longitudSalida: posicion.lng,
-    fechaSalida: formatFecha(new Date()),
-    horaSalida: formatHora(new Date()),
+    fechaSalida: formatFecha(momentoSalida),
+    horaSalida: formatHora(momentoSalida),
+    detectadoSalida: true,
+    momentoDeteccionSalida: momentoSalida,
     estado: "pendiente",
     intentos: 0,
     errorMensaje: null,
@@ -218,7 +229,7 @@ async function procesarSalida(manifiesto, punto, posicion) {
 
 async function procesarSinSalida(manifiesto, punto) {
   logger.warn(
-    `No departure detected (72h limit): ${manifiesto.placa} at Point ${punto.codigoPunto}`
+    `No se detectó salida (límite de 72 horas): ${manifiesto.placa} en el punto ${punto.codigoPunto}`,
   );
 
   await RegistroRMM.findByIdAndUpdate(punto.rmmId, {
@@ -232,7 +243,7 @@ function estaEnGeocerca(posicion, punto) {
 }
 
 function calcularDistancia(posicion, punto) {
-  const R = 6371e3; // Earth radius in meters
+  const R = 6371e3;
   const φ1 = (posicion.lat * Math.PI) / 180;
   const φ2 = (punto.latitud * Math.PI) / 180;
   const Δφ = ((punto.latitud - posicion.lat) * Math.PI) / 180;
@@ -244,7 +255,7 @@ function calcularDistancia(posicion, punto) {
 
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-  return R * c; // Distance in meters
+  return R * c; // Distancia en metros
 }
 
 function formatFecha(date) {
@@ -260,12 +271,10 @@ function formatHora(date) {
   return `${hora}:${minuto}`;
 }
 
-// Scheduled interval: Every 1 minute
+//Tarea programada para ejecutar el worker cada minuto
 cron.schedule("* * * * *", () => {
   monitorVehiculos();
 });
-
-logger.info("Worker started: Vehicle Monitoring");
 
 if (mongoose.connection.readyState === 1) {
   monitorVehiculos();

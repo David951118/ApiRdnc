@@ -6,9 +6,13 @@ const connectDB = require("./config/database");
 
 // Importar rutas
 const indexRoutes = require("./routes/index");
+const authRoutes = require("./routes/auth");
 const manifiestosRoutes = require("./routes/manifiestos");
 const rmmRoutes = require("./routes/rmm");
 const asignacionesRoutes = require("./routes/asignaciones");
+
+// Importar middleware de autenticación
+const { authenticate } = require("./middleware/auth");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -28,11 +32,13 @@ connectDB().then(() => {
   require("./workers/syncManifiestos").init();
   require("./workers/monitorVehiculos");
   require("./workers/reportRMM");
+  require("./workers/detectRNMM"); // Detectar casos para RNMM
+  require("./workers/reportRNMM"); // Reportar RNMM al RNDC
 
   console.log("Workers initialized successfully");
 });
 
-// Health Check Endpoint (para monitoreo)
+// Health Check Endpoint (para monitoreo) - SIN autenticación
 app.get("/health", (req, res) => {
   const mongoose = require("mongoose");
   res.json({
@@ -45,13 +51,16 @@ app.get("/health", (req, res) => {
   });
 });
 
-// Routes
-app.use("/api", indexRoutes);
-app.use("/api/manifiestos", manifiestosRoutes);
-app.use("/api/rmm", rmmRoutes);
-app.use("/api/asignaciones", asignacionesRoutes);
-app.use("/api/vehiculos", require("./routes/vehiculos"));
-app.use("/api/logs", require("./routes/logs"));
+// Routes públicas (sin autenticación)
+app.use("/api/auth", authRoutes); // Login, logout, etc.
+
+// Routes protegidas (requieren autenticación)
+app.use("/api", authenticate, indexRoutes);
+app.use("/api/manifiestos", authenticate, manifiestosRoutes);
+app.use("/api/rmm", authenticate, rmmRoutes);
+app.use("/api/asignaciones", authenticate, asignacionesRoutes);
+app.use("/api/vehiculos", authenticate, require("./routes/vehiculos"));
+app.use("/api/logs", authenticate, require("./routes/logs"));
 
 // 404 Handler
 app.use((req, res) => {
