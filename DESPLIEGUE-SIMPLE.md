@@ -1,30 +1,8 @@
-# 🚀 DESPLIEGUE RNDC EN ROCKY LINUX - PASO A PASO SIMPLE
-
-**Guía comando por comando | MongoDB Local con Seguridad**
-
----
-
-## 📋 ANTES DE EMPEZAR
-
-**Necesitas:**
-
-1.  Usuario y password de **Cellvi API**
-2.  💻 Acceso SSH al **servidor Rocky Linux**
-3.  📝 Decidir un usuario/password para **MongoDB** (recomendado: `rndc_admin` / password seguro)
-
----
+# DESPLIEGUE RNDC EN ROCKY LINUX - PASO A PASO SIMPLE
 
 ## PASO 1: CONECTAR AL SERVIDOR
 
-```bash
-# Conectarse por SSH (cambia TU_IP y TU_USUARIO)
-ssh TU_USUARIO@TU_IP
-
-# Ejemplo:
-# ssh root@192.168.1.100
-```
-
----
+ ssh root@186.111.111.111
 
 ## PASO 2: ACTUALIZAR SISTEMA
 
@@ -121,7 +99,7 @@ sudo nano /etc/mongod.conf
 
 **Buscar la sección `#security:` y cambiarla por:**
 
-```yaml
+```
 security:
   authorization: enabled
 ```
@@ -179,36 +157,24 @@ exit
 
 ## PASO 9: CREAR DIRECTORIO DEL PROYECTO
 
-```bash
 # Crear carpeta
-sudo mkdir -p /opt/rndc
-sudo chown $USER:$USER /opt/rndc
+#cambiar ruta por /var/www/html/Apirndc
+sudo mkdir -p /ruta
+sudo chown $USER:$USER /ruta
 
 # Ir ahí
-cd /opt/rndc
-```
+cd /ruta
 
 ---
 
 ## PASO 10: TRANSFERIR CÓDIGO BACKEND
 
-**En tu PC** (PowerShell):
-
-```powershell
-# Ir a carpeta del proyecto
-cd C:\Users\dsmon\OneDrive\Documentos\Documents\Cellviweb
-
-# Comprimir
-tar --exclude='node_modules' --exclude='.git' --exclude='logs' -czf apirndc.tar.gz apirndc
-
-# Transferir (CAMBIA IP y USUARIO)
-scp apirndc.tar.gz TU_USUARIO@TU_IP:/opt/rndc/
-```
+## pasar repositorip por git o por winscp, si se hace por git hay que agregar el env manualmente
 
 **En el servidor:**
 
 ```bash
-cd /opt/rndc
+cd /ruta
 
 # Descomprimir
 tar -xzf apirndc.tar.gz
@@ -224,41 +190,11 @@ cd backend
 nano .env
 ```
 
-**Copiar esto (CAMBIAR tus datos):**
-
-```env
-# PRODUCCIÓN
-NODE_ENV=production
-PORT=3000
-
-# MONGODB LOCAL CON AUTENTICACIÓN
-MONGODB_URI=mongodb://rndc_admin:Asegurar2025*@localhost:27017/cellvi-rndc
-
-# CELLVI API - TUS CREDENCIALES REALES
-CELLVI_API_URL=https://cellviapi.asegurar.com.co
-CELLVI_USERNAME=TU_USUARIO_CELLVI
-CELLVI_PASSWORD=TU_PASSWORD_CELLVI
-
-# Usuario ADMIN de Cellvi (para workers)
-CELLVI_ADMIN_USERNAME=TU_ADMIN_CELLVI
-CELLVI_ADMIN_PASSWORD=TU_ADMIN_PASSWORD_CELLVI
-
-# RNDC SOAP
-SOAP_ENDPOINT_URL=http://rndcws.mintransporte.gov.co:8080/soap/IBPMServices
-SOAP_REQUEST_TIMEOUT=60000
-
-# LOGS
-LOG_LEVEL=warn
-```
-
-**Guardar:** `Ctrl+X`, `Y`, `Enter`
-
----
 
 ## PASO 12: INSTALAR DEPENDENCIAS
 
 ```bash
-cd /opt/rndc/backend
+cd /ruta
 
 # Instalar
 npm install --production
@@ -295,7 +231,7 @@ node -e "const mongoose = require('mongoose'); const uri = require('dotenv').con
 ## PASO 15: INICIAR BACKEND
 
 ```bash
-cd /opt/rndc/backend
+cd /ruta
 
 # Iniciar con PM2
 pm2 start ecosystem.config.js
@@ -335,138 +271,7 @@ curl http://localhost:3000/health
 
 ---
 
-## PASO 18: COMPILAR FRONTEND (EN TU PC)
-
-```powershell
-# Ir a frontend
-cd C:\Users\dsmon\OneDrive\Documentos\Documents\MAC\asegurar
-
-# Compilar
-npm run build
-
-# Comprimir
-cd build
-tar -czf frontend-build.tar.gz *
-
-# Transferir
-scp frontend-build.tar.gz TU_USUARIO@TU_IP:/opt/rndc/
-```
-
----
-
-## PASO 19: INSTALAR FRONTEND (EN EL SERVIDOR)
-
-```bash
-cd /opt/rndc
-mkdir -p frontend
-cd frontend
-
-# Extraer
-tar -xzf ../frontend-build.tar.gz
-
-# Verificar
-ls -la index.html
-```
-
----
-
-## PASO 20: INSTALAR NGINX
-
-```bash
-sudo dnf install -y nginx
-sudo systemctl enable nginx
-sudo systemctl start nginx
-```
-
----
-
-## PASO 21: CONFIGURAR NGINX
-
-```bash
-sudo nano /etc/nginx/conf.d/rndc.conf
-```
-
-**Copiar (CAMBIAR TU_IP):**
-
-```nginx
-server {
-    listen 80;
-    server_name TU_IP;
-
-    location / {
-        root /opt/rndc/frontend;
-        index index.html;
-        try_files $uri $uri/ /index.html;
-    }
-
-    location /api {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-    }
-
-    location /health {
-        proxy_pass http://localhost:3000/health;
-    }
-}
-```
-
-**Guardar:** `Ctrl+X`, `Y`, `Enter`
-
----
-
-## PASO 22: PERMISOS Y SELINUX
-
-```bash
-# Permisos
-sudo chown -R nginx:nginx /opt/rndc/frontend
-sudo chmod -R 755 /opt/rndc/frontend
-
-# SELinux
-sudo chcon -R -t httpd_sys_content_t /opt/rndc/frontend
-sudo setsebool -P httpd_can_network_connect 1
-```
-
----
-
-## PASO 23: FIREWALL
-
-```bash
-sudo firewall-cmd --permanent --add-service=http
-sudo firewall-cmd --permanent --add-service=https
-sudo firewall-cmd --reload
-```
-
----
-
-## PASO 24: REINICIAR NGINX
-
-```bash
-sudo nginx -t
-sudo systemctl restart nginx
-sudo systemctl status nginx
-```
-
----
-
-## PASO 25: ¡PROBAR!
-
-**En tu navegador:**
-
-```
-http://TU_IP
-```
-
-Deberías ver el login. Al iniciar sesión con Cellvi, el sistema empezará a sincronizar manifiestos automáticamente.
-
----
-
-## PASO 26: VERIFICAR SERVICIOS
+## PASO 18: VERIFICAR SERVICIOS
 
 ```bash
 # PM2
@@ -521,7 +326,7 @@ crontab -e
 
 ---
 
-## 🎉 ¡SISTEMA EN PRODUCCIÓN!
+## ¡SISTEMA EN PRODUCCIÓN!
 
 **Configuración:**
 
@@ -539,7 +344,7 @@ crontab -e
 
 ---
 
-## 🐛 TROUBLESHOOTING
+##  TROUBLESHOOTING
 
 ### Backend no conecta a MongoDB
 
@@ -558,16 +363,7 @@ sudo systemctl status mongod
 sudo journalctl -u mongod -n 50
 ```
 
-### Nginx 502
-
-```bash
-pm2 status
-curl http://localhost:3000/health
-```
-
----
-
-## 📝 COMANDOS ÚTILES
+##  COMANDOS ÚTILES
 
 ```bash
 # Reiniciar todo
@@ -588,4 +384,4 @@ mongodump --uri="mongodb://rndc_admin:TU_PASSWORD@localhost:27017/cellvi-rndc" -
 
 ---
 
-**¡Sistema RNDC en producción con MongoDB seguro! 🚀**
+**¡Sistema RNDC en producción con MongoDB seguro!**
