@@ -33,6 +33,9 @@ const userSessionSchema = new mongoose.Schema(
       username: String,
       email: String,
       roles: [String],
+      persona: String,
+      terceroId: { type: mongoose.Schema.Types.ObjectId, ref: "Tercero" },
+      empresaId: { type: mongoose.Schema.Types.ObjectId, ref: "Tercero" },
     },
 
     // Vehículos asignados al usuario (IDs de Cellvi)

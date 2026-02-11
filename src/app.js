@@ -61,6 +61,15 @@ app.use("/api/rmm", authenticate, rmmRoutes);
 app.use("/api/asignaciones", authenticate, asignacionesRoutes);
 app.use("/api/vehiculos", authenticate, require("./routes/vehiculos"));
 app.use("/api/logs", authenticate, require("./routes/logs"));
+app.use("/api/terceros", authenticate, require("./routes/terceros"));
+app.use("/api/documentos", authenticate, require("./routes/documentos"));
+app.use(
+  "/api/preoperacionales",
+  authenticate,
+  require("./routes/preoperacionales"),
+);
+app.use("/api/empresas", authenticate, require("./routes/empresas"));
+app.use("/api/contratos", authenticate, require("./routes/contratos"));
 
 // 404 Handler
 app.use((req, res) => {
@@ -71,21 +80,8 @@ app.use((req, res) => {
 });
 
 // Global Error Handler
-app.use((err, req, res, next) => {
-  const logger = require("./config/logger");
-  logger.error("Unhandled error:", {
-    error: err.message,
-    stack: err.stack,
-    url: req.url,
-    method: req.method,
-  });
-
-  res.status(err.status || 500).json({
-    success: false,
-    message: err.message || "Internal Server Error",
-    ...(process.env.NODE_ENV === "development" && { stack: err.stack }),
-  });
-});
+// Global Error Handler
+app.use(require("./middleware/errorHandler"));
 
 // Process Error Handlers para producción
 process.on("unhandledRejection", (reason, promise) => {

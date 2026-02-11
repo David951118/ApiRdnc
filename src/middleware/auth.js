@@ -47,6 +47,8 @@ async function authenticate(req, res, next) {
       username: session.username,
       userId: session.userData.userId,
       roles: session.userData.roles,
+      terceroId: session.userData.terceroId,
+      empresaId: session.userData.empresaId,
     };
 
     req.session = {
@@ -92,6 +94,8 @@ async function optionalAuthenticate(req, res, next) {
           username: session.username,
           userId: session.userData.userId,
           roles: session.userData.roles,
+          terceroId: session.userData.terceroId,
+          empresaId: session.userData.empresaId,
         };
 
         req.session = {

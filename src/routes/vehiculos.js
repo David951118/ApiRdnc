@@ -1,39 +1,28 @@
 const express = require("express");
 const router = express.Router();
-const cellviClient = require("../services/cellviClient");
-const logger = require("../config/logger");
+const vehiculoController = require("../controllers/vehiculoController");
+const { authenticate } = require("../middleware/auth");
+const validate = require("../middleware/validate");
+const {
+  createVehiculo,
+  updateVehiculo,
+} = require("../validations/vehiculoValidation");
 
-/**
- * GET /api/vehiculos/:placa/ubicacion
- * Obtiene la última ubicación conocida del vehículo desde Cellvi
- */
-router.get("/:placa/ubicacion", async (req, res) => {
-  try {
-    const { placa } = req.params;
-
-    // Obtener posición (ya incluye lógica de buscar vehículo por placa)
-    const posicion = await cellviClient.getPosicionByPlaca(placa);
-
-    if (!posicion) {
-      return res.status(404).json({
-        success: false,
-        error: "Vehículo no encontrado o sin datos de ubicación",
-      });
-    }
-
-    res.json({
-      success: true,
-      data: posicion,
-    });
-  } catch (error) {
-    logger.error(
-      `Error en API ubicación ${req.params.placa}: ${error.message}`
-    );
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
-  }
-});
+// CRUD Vehículos con Validación
+router.post(
+  "/",
+  authenticate,
+  validate(createVehiculo),
+  vehiculoController.create,
+);
+router.get("/", authenticate, vehiculoController.getAll);
+router.get("/:id", authenticate, vehiculoController.getOne);
+router.put(
+  "/:id",
+  authenticate,
+  validate(updateVehiculo),
+  vehiculoController.update,
+);
+router.delete("/:id", authenticate, vehiculoController.delete);
 
 module.exports = router;
