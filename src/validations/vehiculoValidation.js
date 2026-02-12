@@ -2,14 +2,7 @@ const Joi = require("joi");
 
 const createVehiculo = Joi.object({
   // Identificación
-  placa: Joi.string()
-    .pattern(/^[A-Za-z]{3}\d{3}$/)
-    .uppercase()
-    .required()
-    .messages({
-      "string.pattern.base": "La placa debe tener 3 letras y 3 números",
-      "any.required": "La placa es obligatoria",
-    }),
+  placa: Joi.string().required(),
   numeroInterno: Joi.string().required(),
   idCellvi: Joi.string()
     .required()
@@ -22,17 +15,7 @@ const createVehiculo = Joi.object({
   linea: Joi.string().required(),
   modelo: Joi.number().integer().min(1900).max(2100).required(),
   color: Joi.string().required(),
-  claseVehiculo: Joi.string()
-    .valid(
-      "BUS",
-      "BUSETA",
-      "MICROBUS",
-      "CAMIONETA",
-      "AUTOMOVIL",
-      "CAMION",
-      "TRACTOCAMION",
-    )
-    .required(),
+  claseVehiculo: Joi.string().required(),
   carroceria: Joi.string().default("CERRADA"),
   modalidad: Joi.string().default("ESPECIAL"),
   combustible: Joi.string()
@@ -50,7 +33,10 @@ const createVehiculo = Joi.object({
   propietario: Joi.string()
     .regex(/^[0-9a-fA-F]{24}$/)
     .message("ID de propietario inválido"), // Mongo ID
-  empresaAfiliadora: Joi.string().default("ASEGURAR LTDA"),
+  // ID de la empresa afiliadora (referencia a Empresa)
+  empresaAfiliadora: Joi.string()
+    .regex(/^[0-9a-fA-F]{24}$/)
+    .message("ID de empresa afiliadora inválido"),
   fechaAfiliacion: Joi.date(),
 
   estado: Joi.string().valid("ACTIVO", "MANTENIMIENTO", "INACTIVO", "RETIRADO"),

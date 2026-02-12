@@ -15,13 +15,9 @@ const VehiculoSchema = new Schema(
     color: { type: String, required: true }, // viene de cellvi
     idCellvi: { type: String, required: true }, // viene de cellvi
 
-    claseVehiculo: {
-      type: String,
-      required: true,
-      enum: ["BUS", "BUSETA", "MICROBUS", "CAMIONETA", "AUTOMOVIL"],
-    }, // viene de cellvi
+    claseVehiculo: { type: String, required: true }, // Sin enum: acepta cualquier valor (ej. "CAMIONETA - VAN")
 
-    edad: { type: Number, required: true }, // viene del modelo menos el año actual
+    edad: { type: Number }, // Opcional: se calcula en pre-save como año actual - modelo si no se envía
     modalidad: { type: String, default: "ESPECIAL" },
 
     combustible: {
@@ -39,7 +35,9 @@ const VehiculoSchema = new Schema(
 
     // Propiedad
     propietario: { type: Schema.Types.ObjectId, ref: "Tercero" },
-    empresaAfiliadora: { type: String, default: "ASEGURAR LTDA" },
+    // Empresa a la que está afiliado el vehículo
+    // Ahora se referencia por ID de Empresa para permitir asociación fuerte
+    empresaAfiliadora: { type: Schema.Types.ObjectId, ref: "Empresa" },
     fechaAfiliacion: Date,
 
     // Estado Operativo
@@ -64,6 +62,13 @@ const VehiculoSchema = new Schema(
   },
   { timestamps: true },
 );
+
+// Calcular edad a partir del año del modelo si no se envía
+VehiculoSchema.pre("save", async function () {
+  if (this.modelo != null && (this.edad == null || this.edad === undefined)) {
+    this.edad = new Date().getFullYear() - this.modelo;
+  }
+});
 
 const Vehiculo = mongoose.model("Vehiculo", VehiculoSchema);
 

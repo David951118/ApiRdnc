@@ -3,6 +3,7 @@ const router = express.Router();
 const Manifiesto = require("../models/Manifiesto");
 const RegistroRMM = require("../models/RegistroRMM");
 const Configuracion = require("../models/Configuracion");
+const logger = require("../config/logger");  
 
 // /**
 //  * GET /api/manifiestos - Listar manifiestos con filtros

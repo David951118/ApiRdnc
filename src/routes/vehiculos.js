@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const vehiculoController = require("../controllers/vehiculoController");
 const { authenticate } = require("../middleware/auth");
+const checkRole = require("../middleware/roleCheck");
 const validate = require("../middleware/validate");
 const {
   createVehiculo,
@@ -12,6 +13,8 @@ const {
 router.post(
   "/",
   authenticate,
+  // Solo ADMIN o CLIENTE_ADMIN pueden crear vehículos
+  checkRole(["ADMIN", "CLIENTE_ADMIN"]),
   validate(createVehiculo),
   vehiculoController.create,
 );
