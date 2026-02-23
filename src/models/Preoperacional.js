@@ -63,9 +63,33 @@ const PreoperacionalSchema = new Schema(
     },
     firmadoCheck: Boolean,
     firmaConductorUrl: String,
+
+    // Soft Delete
+    deletedAt: { type: Date, default: null },
+    eliminadoPor: { type: Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true },
 );
+
+PreoperacionalSchema.index({ vehiculo: 1, fecha: -1 });
+PreoperacionalSchema.index({ conductor: 1, fecha: -1 });
+PreoperacionalSchema.index({ deletedAt: 1 });
+
+PreoperacionalSchema.methods.softDelete = async function (userId) {
+  this.deletedAt = new Date();
+  this.eliminadoPor = userId;
+  return await this.save();
+};
+
+PreoperacionalSchema.methods.restore = async function () {
+  this.deletedAt = null;
+  this.eliminadoPor = null;
+  return await this.save();
+};
+
+PreoperacionalSchema.query.notDeleted = function () {
+  return this.where({ deletedAt: null });
+};
 
 const Preoperacional = mongoose.model("Preoperacional", PreoperacionalSchema);
 

@@ -2,19 +2,52 @@ const express = require("express");
 const router = express.Router();
 const documentoController = require("../controllers/documentoController");
 const { authenticate } = require("../middleware/auth");
+const validate = require("../middleware/validate");
+const {
+  createDocumento,
+  updateDocumento,
+} = require("../validations/documentoValidation");
 
-// Subida de archivos (Metadata por ahora)
-router.post("/", authenticate, documentoController.upload);
+// Crear documento (con validación)
+router.post(
+  "/",
+  authenticate,
+  validate(createDocumento),
+  documentoController.upload,
+);
 
-// Listar por entidad (ej: /documentos/vehiculo/:id) -> No, mejor param query o ruta especifica
-// Definimos ruta: /entidad/:entidadId
+// Listar documentos con filtros (nuevo endpoint principal)
+router.get("/", authenticate, documentoController.getAll);
+
+// Listar documentos por entidad específica
 router.get(
   "/entidad/:entidadId",
   authenticate,
   documentoController.getByEntity,
 );
 
-router.put("/:id", authenticate, documentoController.update);
-router.delete("/:id", authenticate, documentoController.delete);
+// Obtener un documento por ID
+router.get("/:id", authenticate, documentoController.getOne);
+
+// Actualizar documento (con validación)
+router.put(
+  "/:id",
+  authenticate,
+  validate(updateDocumento),
+  documentoController.update,
+);
+
+// Soft Delete (eliminación temporal)
+router.delete("/:id", authenticate, documentoController.softDelete);
+
+// Hard Delete (eliminación definitiva) - Solo ADMIN
+router.delete(
+  "/:id/hard",
+  authenticate,
+  documentoController.hardDelete,
+);
+
+// Restaurar documento eliminado
+router.post("/:id/restore", authenticate, documentoController.restore);
 
 module.exports = router;
