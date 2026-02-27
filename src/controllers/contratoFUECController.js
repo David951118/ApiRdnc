@@ -1,5 +1,7 @@
 const ContratoFuec = require("../models/ContratoFUEC");
 const Vehiculo = require("../models/Vehiculo");
+const Ruta = require("../models/Ruta");
+const Documento = require("../models/Documento");
 const logger = require("../config/logger");
 
 function getRoles(req) {
@@ -21,23 +23,150 @@ async function getVehiculosScope(req) {
   return vehiculos.map((v) => v._id);
 }
 
-// Crear Contrato (ADMIN o CLIENTE_ADMIN)
+/**
+ * Crear Contrato FUEC (ADMIN o CLIENTE_ADMIN)
+ *
+ * Lógica de Ruta flexible:
+ *  - Si body.ruta es un OBJETO  → se crea la ruta inline y se vincula
+ *  - Si body.ruta es un STRING  → usa ID de ruta existente
+ *  - Sin ruta                   → contrato sin ruta
+ *
+ * datosSnapshot se auto-construye desde documentos ya cargados del vehículo y conductor.
+ * Si el usuario envía datosSnapshot manual, sus campos tienen PRIORIDAD sobre los del sistema.
+ */
 exports.create = async (req, res) => {
   try {
     const { isAdmin, isClienteAdmin } = getRoles(req);
     if (!isAdmin && !isClienteAdmin) {
-      return res
-        .status(403)
-        .json({
-          success: false,
-          message: "No tiene permisos para generar contratos",
-        });
+      return res.status(403).json({
+        success: false,
+        message: "No tiene permisos para generar contratos",
+      });
     }
 
-    const contrato = new ContratoFuec(req.body);
+    const body = { ...req.body };
+
+    // 1. Ruta inline
+    if (body.ruta && typeof body.ruta === "object" && !body.ruta._id) {
+      try {
+        const nuevaRuta = new Ruta(body.ruta);
+        nuevaRuta.creadoPor = req.user?.userId || null;
+        if (isClienteAdmin && !isAdmin && req.user?.empresaId) {
+          nuevaRuta.empresa = req.user.empresaId;
+        }
+        await nuevaRuta.save();
+        body.ruta = nuevaRuta._id;
+      } catch (rutaErr) {
+        return res.status(400).json({
+          success: false,
+          message: `Error creando ruta inline: ${rutaErr.message}`,
+        });
+      }
+    }
+
+    // 2. Auto-construir datosSnapshot desde documentos existentes del vehículo/conductor
+    if (body.vehiculo || body.conductorPrincipal) {
+      // Documentos vigentes/por vencer del vehículo
+      const docsVehiculo = body.vehiculo
+        ? await Documento.find({
+            entidadId: body.vehiculo,
+            entidadModelo: "Vehiculo",
+            deletedAt: null,
+            estado: { $in: ["VIGENTE", "POR_VENCER"] },
+          })
+            .sort({ fechaVencimiento: -1 })
+            .lean()
+        : [];
+
+      // Licencia del conductor principal
+      const docsConductor = body.conductorPrincipal
+        ? await Documento.find({
+            entidadId: body.conductorPrincipal,
+            entidadModelo: "Tercero",
+            tipoDocumento: "LICENCIA_CONDUCCION",
+            deletedAt: null,
+            estado: { $in: ["VIGENTE", "POR_VENCER"] },
+          })
+            .sort({ fechaVencimiento: -1 })
+            .lean()
+        : [];
+
+      // Mapear el más reciente de cada tipo
+      const byType = {};
+      [...docsVehiculo, ...docsConductor].forEach((d) => {
+        if (!byType[d.tipoDocumento]) byType[d.tipoDocumento] = d;
+      });
+
+      // Construir snapshot automático
+      const autoSnapshot = {};
+
+      if (byType["SOAT"]) {
+        const d = byType["SOAT"];
+        autoSnapshot.soat = {
+          numero: d.numero,
+          vigencia: d.fechaVencimiento,
+          aseguradora: d.entidadEmisora,
+        };
+      }
+      if (byType["TECNOMECANICA"]) {
+        const d = byType["TECNOMECANICA"];
+        autoSnapshot.tecnomecanica = {
+          numero: d.numero,
+          vigencia: d.fechaVencimiento,
+          cda: d.entidadEmisora,
+        };
+      }
+      if (byType["POLIZA_RCE"]) {
+        const d = byType["POLIZA_RCE"];
+        autoSnapshot.rce = {
+          numero: d.numero,
+          vigencia: d.fechaVencimiento,
+          aseguradora: d.entidadEmisora,
+        };
+      }
+      if (byType["POLIZA_RCC"]) {
+        const d = byType["POLIZA_RCC"];
+        autoSnapshot.rcc = {
+          numero: d.numero,
+          vigencia: d.fechaVencimiento,
+          aseguradora: d.entidadEmisora,
+        };
+      }
+      if (byType["TARJETA_OPERACION"]) {
+        const d = byType["TARJETA_OPERACION"];
+        autoSnapshot.tarjetaOperacion = {
+          numero: d.numero,
+          vigencia: d.fechaVencimiento,
+        };
+      }
+      if (byType["LICENCIA_CONDUCCION"]) {
+        const d = byType["LICENCIA_CONDUCCION"];
+        autoSnapshot.licenciaConductor = {
+          numero: d.numero,
+          vigencia: d.fechaVencimiento,
+        };
+      }
+
+      // Merge: el snapshot manual del usuario tiene prioridad campo a campo
+      body.datosSnapshot = Object.assign(
+        {},
+        autoSnapshot,
+        body.datosSnapshot || {},
+      );
+    }
+
+    // 3. Crear contrato
+    const contrato = new ContratoFuec(body);
     contrato.creadoPor = req.user?.userId || null;
     await contrato.save();
-    res.status(201).json({ success: true, data: contrato });
+
+    const populated = await ContratoFuec.findById(contrato._id)
+      .populate("vehiculo", "placa numeroInterno")
+      .populate("conductorPrincipal", "nombres apellidos")
+      .populate("contratante", "razonSocial nombres apellidos")
+      .populate("ruta");
+
+    res.status(201).json({ success: true, data: populated });
   } catch (error) {
     logger.error(`Error creando contrato: ${error.message}`);
     res.status(400).json({ success: false, message: error.message });
@@ -136,12 +265,10 @@ exports.getOne = async (req, res) => {
           contrato.vehiculo?.empresaAfiliadora?.toString() !==
           req.user.empresaId?.toString()
         ) {
-          return res
-            .status(403)
-            .json({
-              success: false,
-              message: "No tiene acceso a este contrato",
-            });
+          return res.status(403).json({
+            success: false,
+            message: "No tiene acceso a este contrato",
+          });
         }
       } else {
         // CLIENTE: verificar contra sus vehículos permitidos
@@ -150,12 +277,10 @@ exports.getOne = async (req, res) => {
           (v) => v.placa === contrato.vehiculo?.placa,
         );
         if (!tieneAcceso)
-          return res
-            .status(403)
-            .json({
-              success: false,
-              message: "No tiene acceso a este contrato",
-            });
+          return res.status(403).json({
+            success: false,
+            message: "No tiene acceso a este contrato",
+          });
       }
     }
 
@@ -171,12 +296,10 @@ exports.update = async (req, res) => {
   try {
     const { isAdmin, isClienteAdmin } = getRoles(req);
     if (!isAdmin && !isClienteAdmin)
-      return res
-        .status(403)
-        .json({
-          success: false,
-          message: "No tiene permisos para editar contratos",
-        });
+      return res.status(403).json({
+        success: false,
+        message: "No tiene permisos para editar contratos",
+      });
 
     const contrato = await ContratoFuec.findOne({
       _id: req.params.id,
@@ -201,12 +324,10 @@ exports.softDelete = async (req, res) => {
   try {
     const { isAdmin, isClienteAdmin } = getRoles(req);
     if (!isAdmin && !isClienteAdmin)
-      return res
-        .status(403)
-        .json({
-          success: false,
-          message: "No tiene permisos para eliminar contratos",
-        });
+      return res.status(403).json({
+        success: false,
+        message: "No tiene permisos para eliminar contratos",
+      });
 
     const contrato = await ContratoFuec.findOne({
       _id: req.params.id,
@@ -234,12 +355,10 @@ exports.restore = async (req, res) => {
   try {
     const { isAdmin, isClienteAdmin } = getRoles(req);
     if (!isAdmin && !isClienteAdmin)
-      return res
-        .status(403)
-        .json({
-          success: false,
-          message: "No tiene permisos para restaurar contratos",
-        });
+      return res.status(403).json({
+        success: false,
+        message: "No tiene permisos para restaurar contratos",
+      });
 
     const contrato = await ContratoFuec.findById(req.params.id);
     if (!contrato)
