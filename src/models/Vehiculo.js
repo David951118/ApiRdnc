@@ -59,6 +59,8 @@ const VehiculoSchema = new Schema(
         taller: String,
       },
     ],
+    deletedAt: { type: Date, default: null },
+    deletedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
   },
   { timestamps: true },
 );
@@ -69,6 +71,18 @@ VehiculoSchema.pre("save", async function () {
     this.edad = new Date().getFullYear() - this.modelo;
   }
 });
+
+VehiculoSchema.methods.softDelete = function (userId) {
+  this.deletedAt = new Date();
+  this.deletedBy = userId || null;
+  return this.save();
+};
+
+VehiculoSchema.methods.restore = function () {
+  this.deletedAt = null;
+  this.deletedBy = null;
+  return this.save();
+};
 
 const Vehiculo = mongoose.model("Vehiculo", VehiculoSchema);
 

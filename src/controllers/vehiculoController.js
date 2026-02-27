@@ -1,57 +1,61 @@
 const Vehiculo = require("../models/Vehiculo");
+const { getVehicleScope } = require("../utils/dataScope");
+const logger = require("../config/logger");
 
-// Crear Vehículo
+// Crear Vehículo (ADMIN o CLIENTE_ADMIN)
 exports.create = async (req, res) => {
   try {
     const vehiculo = new Vehiculo(req.body);
     await vehiculo.save();
-    res.status(201).json(vehiculo);
+    res.status(201).json({ success: true, data: vehiculo });
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    logger.error(`Error creando vehículo: ${error.message}`);
+    res.status(400).json({ success: false, message: error.message });
   }
 };
 
-const { getVehicleScope } = require("../utils/dataScope");
-
-// Listar todos (con paginación opcional y Scope de seguridad)
+// Listar (scope de seguridad + soft-delete excluido por defecto)
 exports.getAll = async (req, res) => {
   try {
-    const { page = 1, limit = 50, placa } = req.query;
+    const { page = 1, limit = 50, placa, includeDeleted = false } = req.query;
 
-    // Obtener Scope de Seguridad (Filtro base)
-    // Obtener Scope de Seguridad (Filtro base)
     const scopeQuery = getVehicleScope(req);
-
-    // Construir consulta con $and para no sobreescribir filtros
     const conditions = [];
 
-    // 1. Agregar restricción de seguridad obligatoria
     if (Object.keys(scopeQuery).length > 0) {
       conditions.push(scopeQuery);
     }
-
-    // 2. Agregar filtro de usuario (si existe)
+    if (!includeDeleted || includeDeleted === "false") {
+      conditions.push({ deletedAt: null });
+    }
     if (placa) {
       conditions.push({ placa: new RegExp(placa, "i") });
     }
 
-    // Consulta final para Mongo
     const query = conditions.length > 0 ? { $and: conditions } : {};
 
+    const skip = (parseInt(page) - 1) * parseInt(limit);
     const vehiculos = await Vehiculo.find(query)
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
-      .populate("propietario", "nombres apellidos razonSocial identificacion");
+      .limit(parseInt(limit))
+      .skip(skip)
+      .populate("propietario", "nombres apellidos razonSocial identificacion")
+      .lean();
 
     const total = await Vehiculo.countDocuments(query);
 
     res.json({
-      vehiculos,
-      totalPages: Math.ceil(total / limit),
-      currentPage: page,
+      success: true,
+      data: vehiculos,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit)),
+      },
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    logger.error(`Error listando vehículos: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -59,48 +63,106 @@ exports.getAll = async (req, res) => {
 exports.getOne = async (req, res) => {
   try {
     const { id } = req.params;
-    // Intentar buscar por ID de Mongo, si falla buscar por Placa
     let vehiculo;
     if (id.match(/^[0-9a-fA-F]{24}$/)) {
-      vehiculo = await Vehiculo.findById(id).populate("propietario");
-    } else {
-      vehiculo = await Vehiculo.findOne({ placa: id.toUpperCase() }).populate(
+      vehiculo = await Vehiculo.findOne({ _id: id, deletedAt: null }).populate(
         "propietario",
       );
+    } else {
+      vehiculo = await Vehiculo.findOne({
+        placa: id.toUpperCase(),
+        deletedAt: null,
+      }).populate("propietario");
     }
 
     if (!vehiculo)
-      return res.status(404).json({ message: "Vehículo no encontrado" });
-    res.json(vehiculo);
+      return res
+        .status(404)
+        .json({ success: false, message: "Vehículo no encontrado" });
+    res.json({ success: true, data: vehiculo });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    logger.error(`Error obteniendo vehículo: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
 // Actualizar
 exports.update = async (req, res) => {
   try {
-    const { id } = req.params;
-    const vehiculo = await Vehiculo.findByIdAndUpdate(id, req.body, {
-      new: true,
+    const vehiculo = await Vehiculo.findOne({
+      _id: req.params.id,
+      deletedAt: null,
     });
     if (!vehiculo)
-      return res.status(404).json({ message: "Vehículo no encontrado" });
-    res.json(vehiculo);
+      return res
+        .status(404)
+        .json({ success: false, message: "Vehículo no encontrado" });
+
+    Object.assign(vehiculo, req.body);
+    await vehiculo.save();
+    res.json({ success: true, data: vehiculo });
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    logger.error(`Error actualizando vehículo: ${error.message}`);
+    res.status(400).json({ success: false, message: error.message });
   }
 };
 
-// Eliminar (Soft delete preferiblemente, pero aquí físico por ahora)
-exports.delete = async (req, res) => {
+// Soft Delete
+exports.softDelete = async (req, res) => {
   try {
-    const { id } = req.params;
-    const vehiculo = await Vehiculo.findByIdAndDelete(id);
+    const vehiculo = await Vehiculo.findOne({
+      _id: req.params.id,
+      deletedAt: null,
+    });
     if (!vehiculo)
-      return res.status(404).json({ message: "Vehículo no encontrado" });
-    res.json({ message: "Vehículo eliminado correctamente" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Vehículo no encontrado" });
+
+    await vehiculo.softDelete(req.user?.userId || null);
+    res.json({
+      success: true,
+      message: "Vehículo eliminado temporalmente",
+      data: vehiculo,
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    logger.error(`Error soft-delete vehículo: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Restaurar
+exports.restore = async (req, res) => {
+  try {
+    const vehiculo = await Vehiculo.findById(req.params.id);
+    if (!vehiculo)
+      return res
+        .status(404)
+        .json({ success: false, message: "Vehículo no encontrado" });
+    if (!vehiculo.deletedAt)
+      return res
+        .status(400)
+        .json({ success: false, message: "El vehículo no está eliminado" });
+
+    await vehiculo.restore();
+    res.json({ success: true, message: "Vehículo restaurado", data: vehiculo });
+  } catch (error) {
+    logger.error(`Error restaurando vehículo: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Hard Delete (Solo ADMIN)
+exports.hardDelete = async (req, res) => {
+  try {
+    const vehiculo = await Vehiculo.findByIdAndDelete(req.params.id);
+    if (!vehiculo)
+      return res
+        .status(404)
+        .json({ success: false, message: "Vehículo no encontrado" });
+    res.json({ success: true, message: "Vehículo eliminado permanentemente" });
+  } catch (error) {
+    logger.error(`Error hard-delete vehículo: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
   }
 };

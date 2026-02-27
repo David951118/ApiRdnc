@@ -88,6 +88,8 @@ const TerceroSchema = new Schema(
       area: String,
       fechaIngreso: Date,
     },
+    deletedAt: { type: Date, default: null },
+    deletedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
   },
   { timestamps: true },
 );
@@ -114,6 +116,18 @@ TerceroSchema.index(
 
 TerceroSchema.index({ roles: 1 });
 TerceroSchema.index({ empresa: 1 });
+
+TerceroSchema.methods.softDelete = function (userId) {
+  this.deletedAt = new Date();
+  this.deletedBy = userId || null;
+  return this.save();
+};
+
+TerceroSchema.methods.restore = function () {
+  this.deletedAt = null;
+  this.deletedBy = null;
+  return this.save();
+};
 
 const Tercero = mongoose.model("Tercero", TerceroSchema);
 

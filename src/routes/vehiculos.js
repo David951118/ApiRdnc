@@ -9,23 +9,52 @@ const {
   updateVehiculo,
 } = require("../validations/vehiculoValidation");
 
-// CRUD Vehículos con Validación
+// Crear
 router.post(
   "/",
   authenticate,
-  // Solo ADMIN o CLIENTE_ADMIN pueden crear vehículos
   checkRole(["ADMIN", "CLIENTE_ADMIN"]),
   validate(createVehiculo),
   vehiculoController.create,
 );
+
+// Listar
 router.get("/", authenticate, vehiculoController.getAll);
+
+// Obtener por ID o Placa
 router.get("/:id", authenticate, vehiculoController.getOne);
+
+// Actualizar
 router.put(
   "/:id",
   authenticate,
+  checkRole(["ADMIN", "CLIENTE_ADMIN"]),
   validate(updateVehiculo),
   vehiculoController.update,
 );
-router.delete("/:id", authenticate, vehiculoController.delete);
+
+// Soft Delete
+router.delete(
+  "/:id",
+  authenticate,
+  checkRole(["ADMIN", "CLIENTE_ADMIN"]),
+  vehiculoController.softDelete,
+);
+
+// Restaurar
+router.post(
+  "/:id/restore",
+  authenticate,
+  checkRole(["ADMIN", "CLIENTE_ADMIN"]),
+  vehiculoController.restore,
+);
+
+// Hard Delete
+router.delete(
+  "/:id/hard",
+  authenticate,
+  checkRole(["ADMIN"]),
+  vehiculoController.hardDelete,
+);
 
 module.exports = router;

@@ -1,32 +1,26 @@
 const Tercero = require("../models/Tercero");
+const logger = require("../config/logger");
+
+// Helper de roles inline
+function getRoles(req) {
+  const rolesUpper = (req.user?.roles || []).map((r) => r.toUpperCase());
+  return {
+    isAdmin: rolesUpper.includes("ADMIN"),
+    isClienteAdmin: rolesUpper.includes("CLIENTE_ADMIN"),
+  };
+}
 
 exports.create = async (req, res) => {
   try {
-    const currentUserRoles = req.user.roles || [];
+    const { isAdmin, isClienteAdmin } = getRoles(req);
     const newRoles = req.body.roles || [];
 
-    // Verificar si es CLIENTE_ADMIN (y no ADMIN)
-    const isAdmin = currentUserRoles.some(
-      (r) => r.includes("ADMIN") && !r.includes("CLIENTE"),
-    );
-    const isClienteAdmin = currentUserRoles.some((r) =>
-      r.includes("CLIENTE_ADMIN"),
-    );
-
     if (isClienteAdmin && !isAdmin) {
-      // Restricción: No puede crear ADMINISTRATIVO ni otros ADMINS
-      const forbiddenRoles = [
-        "ADMINISTRATIVO",
-        "ADMIN",
-        "SUPER_ADMIN",
-        "CLIENTE_ADMIN",
-      ];
+      const forbiddenRoles = ["ADMINISTRATIVO", "ADMIN", "CLIENTE_ADMIN"];
       const hasForbidden = newRoles.some((r) => forbiddenRoles.includes(r));
-
       if (hasForbidden) {
         return res.status(403).json({
           success: false,
-          error: "Permisos Insuficientes",
           message:
             "Como Cliente Admin no puede crear roles Administrativos o de Admin.",
         });
@@ -35,73 +29,85 @@ exports.create = async (req, res) => {
 
     const tercero = new Tercero(req.body);
 
-    // Si es Cliente Admin, amarrar el nuevo tercero a su empresa
     if (isClienteAdmin && !isAdmin && req.user.empresaId) {
       tercero.empresa = req.user.empresaId;
     }
 
     await tercero.save();
-    res.status(201).json(tercero);
+    res.status(201).json({ success: true, data: tercero });
   } catch (error) {
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
-        error: "Duplicado",
-        message: "Ya existe un tercero con esa identificación.",
+        message: "Ya existe un tercero con esa identificación en esta empresa.",
       });
     }
-    res.status(400).json({ message: error.message });
+    logger.error(`Error creando tercero: ${error.message}`);
+    res.status(400).json({ success: false, message: error.message });
   }
 };
 
 exports.getAll = async (req, res) => {
   try {
-    const { page = 1, limit = 50, search, rol } = req.query;
+    const {
+      page = 1,
+      limit = 50,
+      search,
+      rol,
+      includeDeleted = false,
+    } = req.query;
+    const { isAdmin, isClienteAdmin } = getRoles(req);
     const query = {};
 
-    // --- SEGURIDAD Y ALCANCE (SCOPE) ---
-    const currentUserRoles = req.user.roles || [];
-    const isAdmin = currentUserRoles.some(
-      (r) => r.includes("ADMIN") && !r.includes("CLIENTE"),
-    );
-    const isClienteAdmin = currentUserRoles.some((r) =>
-      r.includes("CLIENTE_ADMIN"),
-    );
+    if (!includeDeleted || includeDeleted === "false") {
+      query.deletedAt = null;
+    }
 
     if (!isAdmin) {
       if (isClienteAdmin && req.user.empresaId) {
-        // Un Cliente Admin ve a todos los de SU empresa
         query.empresa = req.user.empresaId;
       } else {
-        // Un Conductor solo se ve a sí mismo
-        if (req.user.terceroId) {
-          query._id = req.user.terceroId;
-        } else {
+        // CLIENTE normal: solo se ve a sí mismo
+        query._id = req.user.terceroId || undefined;
+        if (!req.user.terceroId) {
           query.usuarioCellvi = req.user.username;
         }
       }
     }
 
     if (search) {
-      query.$text = { $search: search };
+      query.$or = [
+        { nombres: new RegExp(search, "i") },
+        { apellidos: new RegExp(search, "i") },
+        { identificacion: new RegExp(search, "i") },
+        { razonSocial: new RegExp(search, "i") },
+      ];
     }
     if (rol) {
       query.roles = rol;
     }
 
+    const skip = (parseInt(page) - 1) * parseInt(limit);
     const terceros = await Tercero.find(query)
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .limit(parseInt(limit))
+      .skip(skip)
+      .lean();
 
     const total = await Tercero.countDocuments(query);
 
     res.json({
-      terceros,
-      totalPages: Math.ceil(total / limit),
-      currentPage: page,
+      success: true,
+      data: terceros,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit)),
+      },
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    logger.error(`Error listando terceros: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -110,154 +116,168 @@ exports.getOne = async (req, res) => {
     const { id } = req.params;
     let tercero;
     if (id.match(/^[0-9a-fA-F]{24}$/)) {
-      tercero = await Tercero.findById(id);
+      tercero = await Tercero.findOne({ _id: id, deletedAt: null });
     } else {
-      tercero = await Tercero.findOne({ identificacion: id });
+      tercero = await Tercero.findOne({ identificacion: id, deletedAt: null });
     }
 
     if (!tercero)
-      return res.status(404).json({ message: "Tercero no encontrado" });
-    res.json(tercero);
+      return res
+        .status(404)
+        .json({ success: false, message: "Tercero no encontrado" });
+    res.json({ success: true, data: tercero });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    logger.error(`Error obteniendo tercero: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
 exports.getByEmpresa = async (req, res) => {
   try {
     const { empresaId } = req.params;
+    const { isAdmin } = getRoles(req);
 
-    // Validación de Seguridad: CLIENTE_ADMIN solo puede ver su propia empresa
-    const currentUserRoles = req.user.roles || [];
-    const isAdmin = currentUserRoles.some(
-      (r) => r.includes("ADMIN") && !r.includes("CLIENTE"),
-    );
-
-    if (!isAdmin) {
-      // Verificar si la empresa solicitada coincide con la del usuario logueado
-      if (req.user.empresaId?.toString() !== empresaId) {
-        return res
-          .status(403)
-          .json({
-            message: "No tiene permisos para ver datos de esta empresa.",
-          });
-      }
+    if (!isAdmin && req.user.empresaId?.toString() !== empresaId) {
+      return res.status(403).json({
+        success: false,
+        message: "No tiene permisos para ver datos de esta empresa.",
+      });
     }
 
-    const terceros = await Tercero.find({ empresa: empresaId });
-    res.json(terceros);
+    const terceros = await Tercero.find({
+      empresa: empresaId,
+      deletedAt: null,
+    });
+    res.json({ success: true, data: terceros });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    logger.error(`Error getByEmpresa: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
 exports.getByUsuarioCellvi = async (req, res) => {
   try {
     const { usuarioCellvi } = req.params;
-
-    // Seguridad: Un usuario normal solo puede consultar SU PROPIO usuarioCellvi
-    const currentUserRoles = req.user.roles || [];
-    const isAdmin = currentUserRoles.some(
-      (r) => r.includes("ADMIN") && !r.includes("CLIENTE"),
-    );
+    const { isAdmin } = getRoles(req);
 
     if (!isAdmin && req.user.username !== usuarioCellvi) {
-      return res
-        .status(403)
-        .json({ message: "No tiene permiso para consultar este usuario." });
+      return res.status(403).json({
+        success: false,
+        message: "No tiene permiso para consultar este usuario.",
+      });
     }
 
-    const tercero = await Tercero.findOne({ usuarioCellvi }); // findOne porque es único
+    const tercero = await Tercero.findOne({ usuarioCellvi, deletedAt: null });
     if (!tercero)
-      return res.status(404).json({ message: "Usuario no encontrado" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Usuario no encontrado" });
 
-    res.json(tercero);
+    res.json({ success: true, data: tercero });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    logger.error(`Error getByUsuarioCellvi: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
 exports.update = async (req, res) => {
   try {
     const { id } = req.params;
-    const currentUserRoles = req.user.roles || [];
-    const isClienteAdmin = currentUserRoles.some((r) =>
-      r.includes("CLIENTE_ADMIN"),
-    );
-    const isAdmin = currentUserRoles.some(
-      (r) => r.includes("ADMIN") && !r.includes("CLIENTE"),
-    );
+    const { isAdmin, isClienteAdmin } = getRoles(req);
 
-    // Validación de permisos para CLIENTE_ADMIN
+    const tercero = await Tercero.findOne({ _id: id, deletedAt: null });
+    if (!tercero)
+      return res
+        .status(404)
+        .json({ success: false, message: "Tercero no encontrado" });
+
     if (isClienteAdmin && !isAdmin) {
-      const target = await Tercero.findById(id);
-      if (!target)
-        return res.status(404).json({ message: "Tercero no encontrado" });
-
-      // No puede editar a sus superiores o iguales administrativos
-      const protectedRoles = [
-        "ADMIN",
-        "SUPER_ADMIN",
-        "ADMINISTRATIVO",
-        "CLIENTE_ADMIN",
-      ];
-      const isProtected = target.roles.some((r) => protectedRoles.includes(r));
-
+      const protectedRoles = ["ADMIN", "ADMINISTRATIVO", "CLIENTE_ADMIN"];
+      const isProtected = tercero.roles.some((r) => protectedRoles.includes(r));
       if (isProtected) {
         return res.status(403).json({
+          success: false,
           message: "No tiene permisos para editar este perfil de usuario.",
         });
       }
     }
 
-    const tercero = await Tercero.findByIdAndUpdate(id, req.body, {
-      new: true,
-    });
-    if (!tercero)
-      return res.status(404).json({ message: "Tercero no encontrado" });
-    res.json(tercero);
+    Object.assign(tercero, req.body);
+    await tercero.save();
+    res.json({ success: true, data: tercero });
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    logger.error(`Error actualizando tercero: ${error.message}`);
+    res.status(400).json({ success: false, message: error.message });
   }
 };
 
-exports.delete = async (req, res) => {
+// Soft Delete
+exports.softDelete = async (req, res) => {
   try {
     const { id } = req.params;
-    const currentUserRoles = req.user.roles || [];
-    const isClienteAdmin = currentUserRoles.some((r) =>
-      r.includes("CLIENTE_ADMIN"),
-    );
-    const isAdmin = currentUserRoles.some(
-      (r) => r.includes("ADMIN") && !r.includes("CLIENTE"),
-    );
+    const { isAdmin, isClienteAdmin } = getRoles(req);
 
-    // Validación de permisos para CLIENTE_ADMIN
+    const tercero = await Tercero.findOne({ _id: id, deletedAt: null });
+    if (!tercero)
+      return res
+        .status(404)
+        .json({ success: false, message: "Tercero no encontrado" });
+
     if (isClienteAdmin && !isAdmin) {
-      const target = await Tercero.findById(id);
-      if (!target)
-        return res.status(404).json({ message: "Tercero no encontrado" });
-
-      const protectedRoles = [
-        "ADMIN",
-        "SUPER_ADMIN",
-        "ADMINISTRATIVO",
-        "CLIENTE_ADMIN",
-      ];
-      const isProtected = target.roles.some((r) => protectedRoles.includes(r));
-
+      const protectedRoles = ["ADMIN", "ADMINISTRATIVO", "CLIENTE_ADMIN"];
+      const isProtected = tercero.roles.some((r) => protectedRoles.includes(r));
       if (isProtected) {
         return res.status(403).json({
+          success: false,
           message: "No tiene permisos para eliminar este perfil de usuario.",
         });
       }
     }
 
-    const tercero = await Tercero.findByIdAndDelete(id);
-    if (!tercero)
-      return res.status(404).json({ message: "Tercero no encontrado" });
-    res.json({ message: "Tercero eliminado" });
+    await tercero.softDelete(req.user?.userId || null);
+    res.json({
+      success: true,
+      message: "Tercero eliminado temporalmente",
+      data: tercero,
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    logger.error(`Error soft-delete tercero: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Restaurar
+exports.restore = async (req, res) => {
+  try {
+    const tercero = await Tercero.findById(req.params.id);
+    if (!tercero)
+      return res
+        .status(404)
+        .json({ success: false, message: "Tercero no encontrado" });
+    if (!tercero.deletedAt)
+      return res
+        .status(400)
+        .json({ success: false, message: "El tercero no está eliminado" });
+
+    await tercero.restore();
+    res.json({ success: true, message: "Tercero restaurado", data: tercero });
+  } catch (error) {
+    logger.error(`Error restaurando tercero: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Hard Delete (Solo ADMIN)
+exports.hardDelete = async (req, res) => {
+  try {
+    const tercero = await Tercero.findByIdAndDelete(req.params.id);
+    if (!tercero)
+      return res
+        .status(404)
+        .json({ success: false, message: "Tercero no encontrado" });
+    res.json({ success: true, message: "Tercero eliminado permanentemente" });
+  } catch (error) {
+    logger.error(`Error hard-delete tercero: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
   }
 };

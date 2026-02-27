@@ -7,19 +7,12 @@ const logger = require("../config/logger");
  * Helper: Obtener scope de documentos según rol del usuario
  */
 async function getDocumentScope(req) {
-  const roles = req.user?.roles || [];
-  const isAdmin = roles.some(
-    (r) =>
-      r.toUpperCase().includes("ADMIN") &&
-      !r.toUpperCase().includes("CLIENT"),
-  );
-  const isSuperAdmin = roles.some((r) => r.toUpperCase().includes("SUPER"));
-  const isClienteAdmin = roles.some(
-    (r) => r.toUpperCase().includes("CLIENT") && r.toUpperCase().includes("ADMIN"),
-  );
+  const rolesUpper = (req.user?.roles || []).map((r) => r.toUpperCase());
+  const isAdmin = rolesUpper.includes("ADMIN");
+  const isClienteAdmin = rolesUpper.includes("CLIENTE_ADMIN");
 
-  // ADMIN o SUPER_ADMIN: Ven todo
-  if (isAdmin || isSuperAdmin) {
+  // ADMIN: Ven todo
+  if (isAdmin) {
     return {};
   }
 
@@ -49,16 +42,36 @@ async function getDocumentScope(req) {
     };
   }
 
-  // CLIENTE normal: Solo sus propios documentos (tercero asociado a su usuario)
+  // CLIENTE normal: Solo sus propios documentos (tercero asociado a su usuario) y de sus vehiculos permitidos
   const terceroId = req.user?.terceroId;
-  if (!terceroId) {
-    return { _id: null }; // No tiene tercero asociado, no ve nada
+  const permitidos = req.session?.vehiculosPermitidos || [];
+  const placas = permitidos.map((v) => v.placa);
+
+  const $or = [];
+  if (terceroId) {
+    $or.push({ entidadModelo: "Tercero", entidadId: terceroId });
   }
 
-  return {
-    entidadModelo: "Tercero",
-    entidadId: terceroId,
-  };
+  if (placas.length > 0) {
+    const vehiculosPermitidosDb = await Vehiculo.find({
+      placa: { $in: placas },
+    })
+      .select("_id")
+      .lean();
+    const vehiculoPermitidosIds = vehiculosPermitidosDb.map((v) => v._id);
+    if (vehiculoPermitidosIds.length > 0) {
+      $or.push({
+        entidadModelo: "Vehiculo",
+        entidadId: { $in: vehiculoPermitidosIds },
+      });
+    }
+  }
+
+  if ($or.length === 0) {
+    return { _id: null }; // No tiene tercero asociado ni vehiculos, no ve nada
+  }
+
+  return { $or };
 }
 
 /**
@@ -80,12 +93,8 @@ exports.upload = async (req, res) => {
       }
 
       // Verificar acceso al vehículo
-      const roles = req.user?.roles || [];
-      const isAdmin = roles.some(
-        (r) =>
-          r.toUpperCase().includes("ADMIN") &&
-          !r.toUpperCase().includes("CLIENT"),
-      );
+      const rolesUpper = (req.user?.roles || []).map((r) => r.toUpperCase());
+      const isAdmin = rolesUpper.includes("ADMIN");
 
       if (!isAdmin) {
         const vehiculosPermitidos = req.session?.vehiculosPermitidos || [];
@@ -110,15 +119,9 @@ exports.upload = async (req, res) => {
       }
 
       // Verificar acceso al tercero
-      const roles = req.user?.roles || [];
-      const isAdmin = roles.some(
-        (r) =>
-          r.toUpperCase().includes("ADMIN") &&
-          !r.toUpperCase().includes("CLIENT"),
-      );
-      const isClienteAdmin = roles.some(
-        (r) => r.toUpperCase().includes("CLIENT") && r.toUpperCase().includes("ADMIN"),
-      );
+      const rolesUpper = (req.user?.roles || []).map((r) => r.toUpperCase());
+      const isAdmin = rolesUpper.includes("ADMIN");
+      const isClienteAdmin = rolesUpper.includes("CLIENTE_ADMIN");
 
       if (!isAdmin && !isClienteAdmin) {
         // Cliente normal solo puede crear documentos de sí mismo
@@ -133,7 +136,8 @@ exports.upload = async (req, res) => {
         if (entidad.empresa?.toString() !== req.user?.empresaId?.toString()) {
           return res.status(403).json({
             success: false,
-            message: "No tiene permisos para crear documentos de terceros fuera de su empresa",
+            message:
+              "No tiene permisos para crear documentos de terceros fuera de su empresa",
           });
         }
       }
@@ -241,7 +245,10 @@ exports.getByEntity = async (req, res) => {
     const { entidadId } = req.params;
     const { includeDeleted = false } = req.query;
 
-    const query = { entidadId, deletedAt: includeDeleted === "true" ? { $ne: null } : null };
+    const query = {
+      entidadId,
+      deletedAt: includeDeleted === "true" ? { $ne: null } : null,
+    };
 
     // Verificar acceso según rol
     const scope = await getDocumentScope(req);
@@ -415,18 +422,14 @@ exports.softDelete = async (req, res) => {
  */
 exports.hardDelete = async (req, res) => {
   try {
-    const roles = req.user?.roles || [];
-    const isAdmin = roles.some(
-      (r) =>
-        r.toUpperCase().includes("ADMIN") &&
-        !r.toUpperCase().includes("CLIENT"),
-    );
-    const isSuperAdmin = roles.some((r) => r.toUpperCase().includes("SUPER"));
+    const rolesUpper = (req.user?.roles || []).map((r) => r.toUpperCase());
+    const isAdmin = rolesUpper.includes("ADMIN");
 
-    if (!isAdmin && !isSuperAdmin) {
+    if (!isAdmin) {
       return res.status(403).json({
         success: false,
-        message: "Solo administradores pueden eliminar documentos permanentemente",
+        message:
+          "Solo administradores pueden eliminar documentos permanentemente",
       });
     }
 

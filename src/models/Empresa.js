@@ -45,12 +45,26 @@ const EmpresaSchema = new Schema(
       enum: ["TRANSPORTADORA", "CLIENTE_CORPORATIVO", "PROVEEDOR"],
       default: "TRANSPORTADORA",
     },
+    deletedAt: { type: Date, default: null },
+    deletedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
   },
   { timestamps: true },
 );
 
 EmpresaSchema.index({ nit: 1 });
 EmpresaSchema.index({ razonSocial: 1 });
+
+EmpresaSchema.methods.softDelete = function (userId) {
+  this.deletedAt = new Date();
+  this.deletedBy = userId || null;
+  return this.save();
+};
+
+EmpresaSchema.methods.restore = function () {
+  this.deletedAt = null;
+  this.deletedBy = null;
+  return this.save();
+};
 
 const Empresa = mongoose.model("Empresa", EmpresaSchema);
 

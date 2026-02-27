@@ -76,11 +76,14 @@ const DocumentoSchema = new Schema(
     observaciones: String,
 
     // Auditoría
-    subidoPor: { type: Schema.Types.ObjectId, ref: "User" },
+    // Se almacena el identificador/username del usuario que sube el documento
+    // (viene de req.user.userId / username, no de la colección User local)
+    subidoPor: { type: String },
 
     // Soft Delete
     deletedAt: { type: Date, default: null },
-    eliminadoPor: { type: Schema.Types.ObjectId, ref: "User" },
+    // Identificador del usuario que eliminó el documento (username/userId)
+    eliminadoPor: { type: String },
   },
   { timestamps: true },
 );

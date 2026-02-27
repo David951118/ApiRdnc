@@ -74,6 +74,8 @@ const ContratoFuecSchema = new Schema(
       tarjetaOperacion: { numero: String, vigencia: Date },
       licenciaConductor: { numero: String, vigencia: Date, categoria: String },
     },
+    deletedAt: { type: Date, default: null },
+    deletedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
   },
   { timestamps: true },
 );
@@ -82,6 +84,18 @@ const ContratoFuecSchema = new Schema(
 ContratoFuecSchema.index({ consecutivo: 1 });
 ContratoFuecSchema.index({ vehiculo: 1, estado: 1 });
 ContratoFuecSchema.index({ vigenciaInicio: 1, vigenciaFin: 1 });
+
+ContratoFuecSchema.methods.softDelete = function (userId) {
+  this.deletedAt = new Date();
+  this.deletedBy = userId || null;
+  return this.save();
+};
+
+ContratoFuecSchema.methods.restore = function () {
+  this.deletedAt = null;
+  this.deletedBy = null;
+  return this.save();
+};
 
 const ContratoFuec = mongoose.model("ContratoFuec", ContratoFuecSchema);
 

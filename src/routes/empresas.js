@@ -9,7 +9,7 @@ const {
   updateEmpresa,
 } = require("../validations/empresaValidation");
 
-// Todas las rutas requieren autenticación y rol ADMIN
+// Crear
 router.post(
   "/",
   authenticate,
@@ -18,10 +18,13 @@ router.post(
   empresaController.create,
 );
 
+// Listar
 router.get("/", authenticate, checkRole(["ADMIN"]), empresaController.getAll);
 
+// Obtener por ID
 router.get("/:id", authenticate, empresaController.getOne);
 
+// Actualizar
 router.put(
   "/:id",
   authenticate,
@@ -30,11 +33,28 @@ router.put(
   empresaController.update,
 );
 
+// Soft Delete
 router.delete(
   "/:id",
   authenticate,
   checkRole(["ADMIN"]),
-  empresaController.delete,
+  empresaController.softDelete,
+);
+
+// Restaurar
+router.post(
+  "/:id/restore",
+  authenticate,
+  checkRole(["ADMIN"]),
+  empresaController.restore,
+);
+
+// Hard Delete
+router.delete(
+  "/:id/hard",
+  authenticate,
+  checkRole(["ADMIN"]),
+  empresaController.hardDelete,
 );
 
 module.exports = router;

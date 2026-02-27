@@ -10,20 +10,11 @@ const logger = require("../config/logger");
  * - CLIENTE: solo sus vehiculosPermitidos
  */
 async function getPreoperacionalScope(req) {
-  const roles = req.user?.roles || [];
-  const isAdmin = roles.some(
-    (r) =>
-      r.toUpperCase().includes("ADMIN") &&
-      !r.toUpperCase().includes("CLIENT"),
-  );
-  const isSuperAdmin = roles.some((r) => r.toUpperCase().includes("SUPER"));
-  const isClienteAdmin = roles.some(
-    (r) =>
-      r.toUpperCase().includes("CLIENT") &&
-      r.toUpperCase().includes("ADMIN"),
-  );
+  const rolesUpper = (req.user?.roles || []).map((r) => r.toUpperCase());
+  const isAdmin = rolesUpper.includes("ADMIN");
+  const isClienteAdmin = rolesUpper.includes("CLIENTE_ADMIN");
 
-  if (isAdmin || isSuperAdmin) {
+  if (isAdmin) {
     return {};
   }
 
@@ -404,15 +395,10 @@ exports.restore = async (req, res) => {
  */
 exports.hardDelete = async (req, res) => {
   try {
-    const roles = req.user?.roles || [];
-    const isAdmin = roles.some(
-      (r) =>
-        r.toUpperCase().includes("ADMIN") &&
-        !r.toUpperCase().includes("CLIENT"),
-    );
-    const isSuperAdmin = roles.some((r) => r.toUpperCase().includes("SUPER"));
+    const rolesUpper = (req.user?.roles || []).map((r) => r.toUpperCase());
+    const isAdmin = rolesUpper.includes("ADMIN");
 
-    if (!isAdmin && !isSuperAdmin) {
+    if (!isAdmin) {
       return res.status(403).json({
         success: false,
         message:
