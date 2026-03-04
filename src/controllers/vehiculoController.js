@@ -86,6 +86,29 @@ exports.getOne = async (req, res) => {
   }
 };
 
+// Obtener lista por idCellvi
+exports.getByCellviId = async (req, res) => {
+  try {
+    const { idCellvi } = req.params;
+
+    const scopeQuery = getVehicleScope(req);
+    const conditions = [{ idCellvi }, { deletedAt: null }];
+
+    if (Object.keys(scopeQuery).length > 0) {
+      conditions.push(scopeQuery);
+    }
+
+    const vehiculos = await Vehiculo.find({ $and: conditions })
+      .populate("propietario", "nombres apellidos razonSocial identificacion")
+      .lean();
+
+    res.json({ success: true, data: vehiculos, total: vehiculos.length });
+  } catch (error) {
+    logger.error(`Error obteniendo vehículos por idCellvi: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // Actualizar
 exports.update = async (req, res) => {
   try {

@@ -21,6 +21,9 @@ router.post(
 // Listar
 router.get("/", authenticate, vehiculoController.getAll);
 
+// Obtener lista por idCellvi
+router.get("/cellvi/:idCellvi", authenticate, vehiculoController.getByCellviId);
+
 // Obtener por ID o Placa
 router.get("/:id", authenticate, vehiculoController.getOne);
 
