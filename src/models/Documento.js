@@ -26,25 +26,25 @@ const DocumentoSchema = new Schema(
       required: true,
       enum: [
         // Vehículos
-        "SOAT",
+        "SOAT", // no tiene
         "TECNOMECANICA",
-        "POLIZA_RCE", // Contractual
-        "POLIZA_RCC", // Extracontractual
-        "TARJETA_OPERACION",
+        "POLIZA_RCE", // Contractualresponsabilidad civil extra colectivas
+        "POLIZA_RCC", // Extracontractual responsabilidad civil colectivas
+        "TARJETA_OPERACION", // individual vehiculos
         "TARJETA_PROPIEDAD",
-        "REVISION_PREVENTIVA",
+        "REVISION_PREVENTIVA",// tecnomecanica
         // Personas (Conductores)
         "LICENCIA_CONDUCCION",
-        "CEDULA",
+        "CEDULA", //no tiene 
         "ARL",
-        "EPS",
-        "FONDO_PENSIONES",
-        "EXAMEN_MEDICO",
-        "CAPACITACION_PESV",
+        "EPS", // todo caja de compensansion familiar 
+        "FONDO_PENSIONES", // numero de planilla opcinal
+        "EXAMEN_MEDICO", // agregar el numero de planilla como copnal pila agregar observaciones
+        "CAPACITACION_PESV",// no tiene
         // Contratos
-        "CONTRATO_CLIENTE",
-        "RUT",
-        "CAMARA_COMERCIO",
+        "CONTRATO_CLIENTE",// empresa
+        "RUT", // varios personas
+        "CAMARA_COMERCIO",// empresa revisar esta parte, 
         "OTROS",
       ],
     },
@@ -133,3 +133,7 @@ DocumentoSchema.query.notDeleted = function () {
 const Documento = mongoose.model("Documento", DocumentoSchema);
 
 module.exports = Documento;
+
+
+
+//Todo, terinar los documentos, las estdisticas del inicio, y  la valdiacion se hace displayada, que lo haga el backend, documentos vigentes, eliminacion de documentos.
