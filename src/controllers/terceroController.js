@@ -1,12 +1,16 @@
 const Tercero = require("../models/Tercero");
+const ContratoFuec = require("../models/ContratoFUEC");
+const { deleteDocumentosWithS3, cleanEntidadesAsociadas } = require("../helpers/cascadeDelete");
 const logger = require("../config/logger");
 
 // Helper de roles inline
 function getRoles(req) {
-  const rolesUpper = (req.user?.roles || []).map((r) => r.toUpperCase());
+  const rolesNormalized = (req.user?.roles || []).map((r) =>
+    r.replace("ROLE_", "").toUpperCase(),
+  );
   return {
-    isAdmin: rolesUpper.includes("ADMIN"),
-    isClienteAdmin: rolesUpper.includes("CLIENTE_ADMIN"),
+    isAdmin: rolesNormalized.includes("ADMIN"),
+    isClienteAdmin: rolesNormalized.includes("CLIENTE_ADMIN"),
   };
 }
 
@@ -107,6 +111,55 @@ exports.getAll = async (req, res) => {
     });
   } catch (error) {
     logger.error(`Error listando terceros: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Listado resumido para selectores (Solo ADMIN / CLIENTE_ADMIN)
+exports.getList = async (req, res) => {
+  try {
+    const { page = 1, limit = 50, search, includeDeleted = false } = req.query;
+    const { isAdmin, isClienteAdmin } = getRoles(req);
+    const query = {};
+
+    if (!includeDeleted || includeDeleted === "false") {
+      query.deletedAt = null;
+    }
+
+    if (!isAdmin && isClienteAdmin && req.user.empresaId) {
+      query.empresa = req.user.empresaId;
+    }
+
+    if (search) {
+      query.$or = [
+        { nombres: new RegExp(search, "i") },
+        { apellidos: new RegExp(search, "i") },
+        { identificacion: new RegExp(search, "i") },
+      ];
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const terceros = await Tercero.find(query)
+      .select("nombres apellidos identificacion")
+      .limit(parseInt(limit))
+      .skip(skip)
+      .sort({ nombres: 1 })
+      .lean();
+
+    const total = await Tercero.countDocuments(query);
+
+    res.json({
+      success: true,
+      data: terceros,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit)),
+      },
+    });
+  } catch (error) {
+    logger.error(`Error listando terceros (resumen): ${error.message}`);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -267,15 +320,49 @@ exports.restore = async (req, res) => {
   }
 };
 
-// Hard Delete (Solo ADMIN)
+// Hard Delete con cascada (Solo ADMIN)
 exports.hardDelete = async (req, res) => {
   try {
-    const tercero = await Tercero.findByIdAndDelete(req.params.id);
+    const terceroId = req.params.id;
+    const tercero = await Tercero.findById(terceroId);
     if (!tercero)
       return res
         .status(404)
         .json({ success: false, message: "Tercero no encontrado" });
-    res.json({ success: true, message: "Tercero eliminado permanentemente" });
+
+    // Validar: bloquear si es contratante o conductor en contratos activos
+    const contratosActivos = await ContratoFuec.countDocuments({
+      $or: [
+        { contratante: terceroId },
+        { conductorPrincipal: terceroId },
+        { conductoresAuxiliares: terceroId },
+      ],
+      estado: { $in: ["ACTIVO", "GENERADO"] },
+      deletedAt: null,
+    });
+    if (contratosActivos > 0) {
+      return res.status(409).json({
+        success: false,
+        message: `No se puede eliminar: el tercero tiene ${contratosActivos} contrato(s) activo(s). Anúlelos primero.`,
+      });
+    }
+
+    // 1. Hard delete documentos directos + limpiar S3
+    await deleteDocumentosWithS3({
+      entidadId: terceroId,
+      entidadModelo: "Tercero",
+    });
+
+    // 2. Limpiar de entidadesAsociadas en otros documentos
+    await cleanEntidadesAsociadas([tercero._id], "Tercero");
+
+    // 3. NO borrar preoperacionales — pertenecen al vehículo
+
+    // 4. Hard delete el tercero
+    await tercero.deleteOne();
+
+    logger.info(`Hard delete tercero ${tercero.nombres} ${tercero.apellidos} (${terceroId}) con cascada`);
+    res.json({ success: true, message: "Tercero y documentos asociados eliminados permanentemente" });
   } catch (error) {
     logger.error(`Error hard-delete tercero: ${error.message}`);
     res.status(500).json({ success: false, message: error.message });

@@ -12,6 +12,16 @@ router.post(
   contratoController.create,
 );
 
+// Verificar consecutivo
+router.get(
+  "/verificar-consecutivo/:consecutivo",
+  authenticate,
+  contratoController.verificarConsecutivo,
+);
+
+// Obtener datos QR de un contrato
+router.get("/:id/qr", authenticate, contratoController.getQR);
+
 // Listar
 router.get("/", authenticate, contratoController.getAll);
 

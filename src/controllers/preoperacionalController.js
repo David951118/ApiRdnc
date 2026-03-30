@@ -1,6 +1,7 @@
 const Preoperacional = require("../models/Preoperacional");
 const Vehiculo = require("../models/Vehiculo");
 const Tercero = require("../models/Tercero");
+const Documento = require("../models/Documento");
 const logger = require("../config/logger");
 
 /**
@@ -10,9 +11,11 @@ const logger = require("../config/logger");
  * - CLIENTE: solo sus vehiculosPermitidos
  */
 async function getPreoperacionalScope(req) {
-  const rolesUpper = (req.user?.roles || []).map((r) => r.toUpperCase());
-  const isAdmin = rolesUpper.includes("ADMIN");
-  const isClienteAdmin = rolesUpper.includes("CLIENTE_ADMIN");
+  const rolesNormalized = (req.user?.roles || []).map((r) =>
+    r.replace("ROLE_", "").toUpperCase(),
+  );
+  const isAdmin = rolesNormalized.includes("ADMIN");
+  const isClienteAdmin = rolesNormalized.includes("CLIENTE_ADMIN");
 
   if (isAdmin) {
     return {};
@@ -58,6 +61,96 @@ async function tieneAccesoVehiculo(req, vehiculoId) {
 }
 
 /**
+ * Obtener datos QR de una preoperacional
+ * GET /api/preoperacionales/:id/qr
+ */
+exports.getQR = async (req, res) => {
+  try {
+    const preop = await Preoperacional.findOne({
+      _id: req.params.id,
+      deletedAt: null,
+    })
+      .populate(
+        "vehiculo",
+        "placa numeroInterno marca linea modelo empresaAfiliadora",
+      )
+      .populate("conductor", "nombres apellidos identificacion")
+      .lean();
+
+    if (!preop) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Preoperacional no encontrada" });
+    }
+
+    // Verificar acceso
+    const acceso = await tieneAccesoVehiculo(req, preop.vehiculo?._id);
+    if (!acceso) {
+      return res.status(403).json({
+        success: false,
+        message: "No tiene permisos para ver esta preoperacional",
+      });
+    }
+
+    // Obtener empresa
+    const Empresa = require("../models/Empresa");
+    let empresa = null;
+    if (preop.vehiculo?.empresaAfiliadora) {
+      empresa = await Empresa.findOne({
+        _id: preop.vehiculo.empresaAfiliadora,
+        deletedAt: null,
+      })
+        .select("razonSocial nit branding")
+        .lean();
+    }
+
+    res.json({
+      success: true,
+      data: {
+        codigoPublico: preop.codigoPublico,
+        qrVerificationUrl: `/api/verificar/preoperacional/${preop.codigoPublico}`,
+        contadorQR: preop.contadorQR,
+        fecha: preop.fecha,
+        estadoGeneral: preop.estadoGeneral,
+        kilometraje: preop.kilometraje,
+        vehiculo: preop.vehiculo
+          ? {
+              placa: preop.vehiculo.placa,
+              numeroInterno: preop.vehiculo.numeroInterno,
+              marca: preop.vehiculo.marca,
+              linea: preop.vehiculo.linea,
+              modelo: preop.vehiculo.modelo,
+            }
+          : null,
+        conductor: preop.conductor
+          ? {
+              nombres: preop.conductor.nombres,
+              apellidos: preop.conductor.apellidos,
+              identificacion: preop.conductor.identificacion,
+            }
+          : null,
+        empresa: empresa
+          ? {
+              razonSocial: empresa.razonSocial,
+              nit: empresa.nit,
+              branding: empresa.branding,
+            }
+          : null,
+        seccionDelantera: preop.seccionDelantera,
+        seccionMedia: preop.seccionMedia,
+        seccionTrasera: preop.seccionTrasera,
+        firmadoCheck: preop.firmadoCheck || false,
+        firmaConductorUrl: preop.firmaConductorUrl || null,
+        creadoEn: preop.createdAt,
+      },
+    });
+  } catch (error) {
+    logger.error(`Error obteniendo QR de preoperacional: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
  * Crear preoperacional
  */
 exports.create = async (req, res) => {
@@ -95,9 +188,12 @@ exports.create = async (req, res) => {
       .populate("vehiculo", "placa numeroInterno")
       .populate("conductor", "nombres apellidos");
 
+    const responseData = populated ? populated.toObject() : check.toObject();
+    responseData.qrVerificationUrl = `/api/verificar/preoperacional/${responseData.codigoPublico}`;
+
     res.status(201).json({
       success: true,
-      data: populated || check,
+      data: responseData,
     });
   } catch (error) {
     logger.error(`Error creando preoperacional: ${error.message}`);
@@ -395,8 +491,10 @@ exports.restore = async (req, res) => {
  */
 exports.hardDelete = async (req, res) => {
   try {
-    const rolesUpper = (req.user?.roles || []).map((r) => r.toUpperCase());
-    const isAdmin = rolesUpper.includes("ADMIN");
+    const rolesNormalized = (req.user?.roles || []).map((r) =>
+      r.replace("ROLE_", "").toUpperCase(),
+    );
+    const isAdmin = rolesNormalized.includes("ADMIN");
 
     if (!isAdmin) {
       return res.status(403).json({
@@ -428,3 +526,138 @@ exports.hardDelete = async (req, res) => {
     });
   }
 };
+
+/**
+ * Validar hoja de vida del vehículo y conductor antes de crear preoperacional.
+ * Retorna autorizado: true/false con errores (bloquean) y alertas (POR_VENCER).
+ */
+exports.validarHojaDeVida = async (req, res) => {
+  try {
+    const { vehiculoId, conductorId } = req.params;
+    const errores = [];
+    const alertas = [];
+
+    // 1. Verificar existencia
+    const [vehiculo, conductor] = await Promise.all([
+      Vehiculo.findOne({ _id: vehiculoId, deletedAt: null }),
+      Tercero.findOne({ _id: conductorId, deletedAt: null }),
+    ]);
+
+    if (!vehiculo) {
+      return res.status(404).json({ success: false, message: "Vehículo no encontrado" });
+    }
+    if (!conductor) {
+      return res.status(404).json({ success: false, message: "Conductor no encontrado" });
+    }
+
+    // 2. Verificar permisos
+    const tieneAcceso = await tieneAccesoVehiculo(req, vehiculoId);
+    if (!tieneAcceso) {
+      return res.status(403).json({ success: false, message: "No tiene permisos sobre este vehículo" });
+    }
+
+    // 3. Validar estado del vehículo
+    if (vehiculo.estado !== "ACTIVO") {
+      errores.push({
+        campo: "VEHICULO_ESTADO",
+        mensaje: `El vehículo está en estado ${vehiculo.estado}. Debe estar ACTIVO.`,
+      });
+    }
+
+    // 4. Validar estado y rol del conductor
+    if (conductor.estado !== "ACTIVO") {
+      errores.push({
+        campo: "CONDUCTOR_ESTADO",
+        mensaje: `El conductor está en estado ${conductor.estado}. Debe estar ACTIVO.`,
+      });
+    }
+    if (!conductor.roles || !conductor.roles.includes("CONDUCTOR")) {
+      errores.push({
+        campo: "CONDUCTOR_ROL",
+        mensaje: "El tercero seleccionado no tiene el rol CONDUCTOR asignado.",
+      });
+    }
+
+    // 5. Consultar documentos del vehículo y conductor en paralelo
+    const [docsVehiculo, docsConductor] = await Promise.all([
+      Documento.find({
+        entidadId: vehiculoId,
+        entidadModelo: "Vehiculo",
+        tipoDocumento: { $in: ["SOAT", "TECNOMECANICA", "TARJETA_OPERACION"] },
+        deletedAt: null,
+      })
+        .sort({ fechaVencimiento: -1 })
+        .lean(),
+      Documento.find({
+        entidadId: conductorId,
+        entidadModelo: "Tercero",
+        tipoDocumento: "LICENCIA_CONDUCCION",
+        deletedAt: null,
+      })
+        .sort({ fechaVencimiento: -1 })
+        .lean(),
+    ]);
+
+    // 6. Validar documentos requeridos del vehículo
+    const docsRequeridosVehiculo = ["SOAT", "TECNOMECANICA", "TARJETA_OPERACION"];
+    for (const tipo of docsRequeridosVehiculo) {
+      const docs = docsVehiculo.filter((d) => d.tipoDocumento === tipo);
+      validarDocumento(tipo, docs, "vehículo", errores, alertas);
+    }
+
+    // 7. Validar licencia del conductor
+    validarDocumento("LICENCIA_CONDUCCION", docsConductor, "conductor", errores, alertas);
+
+    res.json({
+      success: true,
+      data: {
+        autorizado: errores.length === 0,
+        errores,
+        alertas,
+      },
+    });
+  } catch (error) {
+    logger.error(`Error validando hoja de vida: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Helper: Validar un tipo de documento y agregar error/alerta según estado.
+ */
+function validarDocumento(tipo, docs, entidad, errores, alertas) {
+  if (!docs.length) {
+    errores.push({
+      campo: tipo,
+      mensaje: `No se encontró ${tipo.replace(/_/g, " ")} registrado para el ${entidad}.`,
+    });
+    return;
+  }
+
+  // Tomar el más reciente (ya ordenados por fechaVencimiento desc)
+  const mejor = docs.find((d) => d.estado === "VIGENTE" || d.estado === "POR_VENCER");
+
+  if (!mejor) {
+    // Todos vencidos/rechazados
+    const masReciente = docs[0];
+    const fecha = masReciente.fechaVencimiento
+      ? new Date(masReciente.fechaVencimiento).toISOString().split("T")[0]
+      : "N/A";
+    errores.push({
+      campo: tipo,
+      mensaje: `${tipo.replace(/_/g, " ")} vencido desde ${fecha}.`,
+    });
+    return;
+  }
+
+  if (mejor.estado === "POR_VENCER" && mejor.fechaVencimiento) {
+    const hoy = new Date();
+    const vence = new Date(mejor.fechaVencimiento);
+    const diasRestantes = Math.ceil((vence - hoy) / (1000 * 60 * 60 * 24));
+    const fecha = vence.toISOString().split("T")[0];
+    alertas.push({
+      campo: tipo,
+      mensaje: `${tipo.replace(/_/g, " ")} vence en ${diasRestantes} día(s) (${fecha}).`,
+    });
+  }
+}

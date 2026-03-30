@@ -11,7 +11,6 @@ const EmpresaSchema = new Schema(
       type: String,
       required: true,
       unique: true,
-      index: true,
     },
     razonSocial: {
       type: String,
@@ -39,6 +38,15 @@ const EmpresaSchema = new Schema(
       default: "ACTIVA",
     },
 
+    // Branding
+    branding: {
+      colorPrimary:     { type: String, default: "#0B5EA8" },
+      colorPrimaryDark: { type: String, default: "#0A2E52" },
+      colorAccent:      { type: String, default: "#FFD400" },
+      logoKey:          { type: String, default: "asegurar" },
+      eslogan:          { type: String, default: "Defensa Predictiva 24/7" },
+    },
+
     // Datos adicionales
     tipoEmpresa: {
       type: String,
@@ -46,12 +54,12 @@ const EmpresaSchema = new Schema(
       default: "TRANSPORTADORA",
     },
     deletedAt: { type: Date, default: null },
-    deletedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    deletedBy: { type: String, default: null },
   },
   { timestamps: true },
 );
 
-EmpresaSchema.index({ nit: 1 });
+// nit ya tiene índice por unique+index en el schema
 EmpresaSchema.index({ razonSocial: 1 });
 
 EmpresaSchema.methods.softDelete = function (userId) {

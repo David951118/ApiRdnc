@@ -21,6 +21,9 @@ router.post(
 // Listar
 router.get("/", authenticate, checkRole(["ADMIN"]), empresaController.getAll);
 
+// Listar resumen (Solo ADMIN)
+router.get("/list", authenticate, checkRole(["ADMIN"]), empresaController.getList);
+
 // Obtener por ID
 router.get("/:id", authenticate, empresaController.getOne);
 

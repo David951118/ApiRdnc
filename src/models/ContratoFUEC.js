@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const crypto = require("crypto");
 const { Schema } = mongoose;
 
 /**
@@ -10,7 +11,7 @@ const ContratoFuecSchema = new Schema(
     // Identificación
     consecutivo: { type: Number, unique: true, required: true }, // Ej: 450001
     anio: { type: Number, required: true },
-    numeroFUEC: { type: String, unique: true }, // Código largo de resolución
+    numeroFUEC: { type: String, unique: true, sparse: true }, // Código largo de resolución
 
     // Relaciones (Quién viaja)
     contratante: {
@@ -60,8 +61,9 @@ const ContratoFuecSchema = new Schema(
 
     // Archivos Generados
     pdfUrl: String,
-    qrCodeData: String,
-    creadoPor: { type: Schema.Types.ObjectId, ref: "User" },
+    qrCodeData: { type: String, unique: true, sparse: true },
+    contadorQR: { type: Number, default: 0 }, // Veces que se ha consultado el QR
+    creadoPor: { type: String },
 
     // === SNAPSHOT LEGAL (INMUTABLE) ===
     // Guardamos los datos de las pólizas y licencias AL MOMENTO DE GENERAR.
@@ -75,15 +77,21 @@ const ContratoFuecSchema = new Schema(
       licenciaConductor: { numero: String, vigencia: Date, categoria: String },
     },
     deletedAt: { type: Date, default: null },
-    deletedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    deletedBy: { type: String, default: null },
   },
   { timestamps: true },
 );
 
-// Índices
-ContratoFuecSchema.index({ consecutivo: 1 });
+// Índices (consecutivo y qrCodeData ya tienen índice por unique en el schema)
 ContratoFuecSchema.index({ vehiculo: 1, estado: 1 });
 ContratoFuecSchema.index({ vigenciaInicio: 1, vigenciaFin: 1 });
+
+// Auto-generar código público para verificación QR al crear
+ContratoFuecSchema.pre("save", async function () {
+  if (this.isNew && !this.qrCodeData) {
+    this.qrCodeData = crypto.randomBytes(16).toString("hex");
+  }
+});
 
 ContratoFuecSchema.methods.softDelete = function (userId) {
   this.deletedAt = new Date();

@@ -60,7 +60,7 @@ const VehiculoSchema = new Schema(
       },
     ],
     deletedAt: { type: Date, default: null },
-    deletedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    deletedBy: { type: String, default: null },
   },
   { timestamps: true },
 );

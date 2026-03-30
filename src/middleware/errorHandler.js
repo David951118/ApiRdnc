@@ -1,13 +1,12 @@
 const logger = require("../config/logger");
 
 const errorHandler = (err, req, res, next) => {
-  // Loggear el error completo en el servidor
+  // Loggear el error en el servidor (sin body para no exponer datos sensibles)
   logger.error("Error no controlado:", {
     message: err.message,
-    stack: err.stack,
+    stack: process.env.NODE_ENV !== "production" ? err.stack : undefined,
     url: req.originalUrl,
     method: req.method,
-    body: req.body,
   });
 
   // Errores de Mongoose (Validación de BD)

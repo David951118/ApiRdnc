@@ -6,6 +6,17 @@ const Preoperacional = require("../models/Preoperacional");
 const Documento = require("../models/Documento");
 const logger = require("../config/logger");
 
+// Helper de roles inline
+function getRoles(req) {
+  const rolesNormalized = (req.user?.roles || []).map((r) =>
+    r.replace("ROLE_", "").toUpperCase(),
+  );
+  return {
+    isAdmin: rolesNormalized.includes("ADMIN"),
+    isClienteAdmin: rolesNormalized.includes("CLIENTE_ADMIN"),
+  };
+}
+
 /**
  * GET /api/estadisticas/empresa/:empresaId
  * Resumen completo de la empresa para dashboard
@@ -13,9 +24,7 @@ const logger = require("../config/logger");
 exports.getEmpresaResumen = async (req, res) => {
   try {
     const { empresaId } = req.params;
-    const rolesUpper = (req.user?.roles || []).map((r) => r.toUpperCase());
-    const isAdmin = rolesUpper.includes("ADMIN");
-    const isClienteAdmin = rolesUpper.includes("CLIENTE_ADMIN");
+    const { isAdmin } = getRoles(req);
 
     // Seguridad: CLIENTE_ADMIN solo puede ver su propia empresa
     if (!isAdmin && req.user?.empresaId?.toString() !== empresaId) {
@@ -140,28 +149,26 @@ exports.getEmpresaResumen = async (req, res) => {
       .lean()
       .then((t) => t.map((x) => x._id));
 
+    const docOrConditions = [
+      { entidadModelo: "Vehiculo", entidadId: { $in: vehiculosIds } },
+      { entidadModelo: "Tercero", entidadId: { $in: terceroIds } },
+      { entidadModelo: "Empresa", entidadId: empresa._id },
+      { "entidadesAsociadas.entidadId": { $in: vehiculosIds } },
+    ];
+
     const totalDocumentos = await Documento.countDocuments({
       deletedAt: null,
-      $or: [
-        { entidadModelo: "Vehiculo", entidadId: { $in: vehiculosIds } },
-        { entidadModelo: "Tercero", entidadId: { $in: terceroIds } },
-      ],
+      $or: docOrConditions,
     });
     const documentosVencidos = await Documento.countDocuments({
       deletedAt: null,
       estado: "VENCIDO",
-      $or: [
-        { entidadModelo: "Vehiculo", entidadId: { $in: vehiculosIds } },
-        { entidadModelo: "Tercero", entidadId: { $in: terceroIds } },
-      ],
+      $or: docOrConditions,
     });
     const documentosPorVencer = await Documento.countDocuments({
       deletedAt: null,
       estado: "POR_VENCER",
-      $or: [
-        { entidadModelo: "Vehiculo", entidadId: { $in: vehiculosIds } },
-        { entidadModelo: "Tercero", entidadId: { $in: terceroIds } },
-      ],
+      $or: docOrConditions,
     });
 
     res.json({
@@ -284,6 +291,69 @@ exports.getGlobal = async (req, res) => {
     });
   } catch (error) {
     logger.error(`Error generando estadísticas globales: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * GET /api/estadisticas/documentos
+ * Resumen de documentos: total, vigentes, por vencer, vencidos
+ * ADMIN: todos los documentos del sistema
+ * CLIENTE_ADMIN: solo documentos de su empresa
+ */
+exports.getDocumentosResumen = async (req, res) => {
+  try {
+    const { isAdmin, isClienteAdmin } = getRoles(req);
+
+    let baseQuery = { deletedAt: null };
+
+    // CLIENTE_ADMIN: filtrar solo documentos de su empresa
+    if (!isAdmin && isClienteAdmin) {
+      const empresaId = req.user?.empresaId;
+      if (!empresaId) {
+        return res.json({
+          success: true,
+          data: { total: 0, vigentes: 0, porVencer: 0, vencidos: 0 },
+        });
+      }
+
+      const vehiculosIds = await Vehiculo.find({
+        empresaAfiliadora: empresaId,
+        deletedAt: null,
+      })
+        .select("_id")
+        .lean()
+        .then((v) => v.map((x) => x._id));
+
+      const terceroIds = await Tercero.find({
+        empresa: empresaId,
+        deletedAt: null,
+      })
+        .select("_id")
+        .lean()
+        .then((t) => t.map((x) => x._id));
+
+      baseQuery.$or = [
+        { entidadModelo: "Vehiculo", entidadId: { $in: vehiculosIds } },
+        { entidadModelo: "Tercero", entidadId: { $in: terceroIds } },
+        { entidadModelo: "Empresa", entidadId: empresaId },
+        { "entidadesAsociadas.entidadId": { $in: vehiculosIds } },
+      ];
+    }
+
+    const [total, vigentes, porVencer, vencidos] = await Promise.all([
+      Documento.countDocuments(baseQuery),
+      Documento.countDocuments({ ...baseQuery, estado: "VIGENTE" }),
+      Documento.countDocuments({ ...baseQuery, estado: "POR_VENCER" }),
+      Documento.countDocuments({ ...baseQuery, estado: "VENCIDO" }),
+    ]);
+
+    res.json({
+      success: true,
+      data: { total, vigentes, porVencer, vencidos },
+    });
+  } catch (error) {
+    logger.error(`Error generando estadísticas de documentos: ${error.message}`);
     res.status(500).json({ success: false, message: error.message });
   }
 };

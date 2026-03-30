@@ -7,7 +7,7 @@ const { Schema } = mongoose;
 const TerceroSchema = new Schema(
   {
     // Identificación Base
-    identificacion: { type: String, required: true, index: true }, // CC o NIT (no único, puede repetirse por empresa)
+    identificacion: { type: String, required: true }, // CC o NIT (índice parcial definido abajo)
     tipoId: {
       type: String,
       required: true,
@@ -18,7 +18,6 @@ const TerceroSchema = new Schema(
     empresa: {
       type: Schema.Types.ObjectId,
       ref: "Empresa",
-      index: true,
     },
 
     // Link con Usuario Cellvi (Login)
@@ -89,7 +88,7 @@ const TerceroSchema = new Schema(
       fechaIngreso: Date,
     },
     deletedAt: { type: Date, default: null },
-    deletedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    deletedBy: { type: String, default: null },
   },
   { timestamps: true },
 );

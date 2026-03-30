@@ -30,6 +30,14 @@ const createEmpresa = Joi.object({
   tipoEmpresa: Joi.string()
     .valid("TRANSPORTADORA", "CLIENTE_CORPORATIVO", "PROVEEDOR")
     .default("TRANSPORTADORA"),
+
+  branding: Joi.object({
+    colorPrimary:     Joi.string().pattern(/^#[0-9A-Fa-f]{6}$/).allow("", null),
+    colorPrimaryDark: Joi.string().pattern(/^#[0-9A-Fa-f]{6}$/).allow("", null),
+    colorAccent:      Joi.string().pattern(/^#[0-9A-Fa-f]{6}$/).allow("", null),
+    logoKey:          Joi.string().allow("", null),
+    eslogan:          Joi.string().allow("", null),
+  }),
 });
 
 const updateEmpresa = createEmpresa.fork(["nit", "razonSocial"], (schema) =>

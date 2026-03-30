@@ -1,15 +1,49 @@
 const Documento = require("../models/Documento");
 const Vehiculo = require("../models/Vehiculo");
 const Tercero = require("../models/Tercero");
+const Empresa = require("../models/Empresa");
 const logger = require("../config/logger");
+const s3Service = require("../services/s3Service");
+
+/**
+ * Helper: Recalcula el estado de un documento según su fechaVencimiento.
+ * Se usa después de queries .lean() donde el pre-save hook no aplica.
+ * No modifica documentos con estado HISTORICO o RECHAZADO.
+ */
+function recalcularEstado(doc) {
+  if (!doc || !doc.fechaVencimiento) return doc;
+  if (doc.estado === "HISTORICO" || doc.estado === "RECHAZADO") return doc;
+
+  const hoy = new Date();
+  const vencimiento = new Date(doc.fechaVencimiento);
+  const diasRestantes = Math.ceil((vencimiento - hoy) / (1000 * 60 * 60 * 24));
+
+  if (diasRestantes < 0) {
+    doc.estado = "VENCIDO";
+  } else if (diasRestantes <= 30) {
+    doc.estado = "POR_VENCER";
+  } else {
+    doc.estado = "VIGENTE";
+  }
+  return doc;
+}
+
+// Helper de roles inline
+function getRoles(req) {
+  const rolesNormalized = (req.user?.roles || []).map((r) =>
+    r.replace("ROLE_", "").toUpperCase(),
+  );
+  return {
+    isAdmin: rolesNormalized.includes("ADMIN"),
+    isClienteAdmin: rolesNormalized.includes("CLIENTE_ADMIN"),
+  };
+}
 
 /**
  * Helper: Obtener scope de documentos según rol del usuario
  */
 async function getDocumentScope(req) {
-  const rolesUpper = (req.user?.roles || []).map((r) => r.toUpperCase());
-  const isAdmin = rolesUpper.includes("ADMIN");
-  const isClienteAdmin = rolesUpper.includes("CLIENTE_ADMIN");
+  const { isAdmin, isClienteAdmin } = getRoles(req);
 
   // ADMIN: Ven todo
   if (isAdmin) {
@@ -38,6 +72,8 @@ async function getDocumentScope(req) {
       $or: [
         { entidadModelo: "Vehiculo", entidadId: { $in: vehiculoIds } },
         { entidadModelo: "Tercero", entidadId: { $in: terceroIds } },
+        { entidadModelo: "Empresa", entidadId: empresaId },
+        { "entidadesAsociadas.entidadId": { $in: vehiculoIds } },
       ],
     };
   }
@@ -64,6 +100,9 @@ async function getDocumentScope(req) {
         entidadModelo: "Vehiculo",
         entidadId: { $in: vehiculoPermitidosIds },
       });
+      $or.push({
+        "entidadesAsociadas.entidadId": { $in: vehiculoPermitidosIds },
+      });
     }
   }
 
@@ -81,6 +120,8 @@ exports.upload = async (req, res) => {
   try {
     const { entidadId, entidadModelo } = req.body;
 
+    const { isAdmin, isClienteAdmin } = getRoles(req);
+
     // 1. Validar que la entidad existe
     let entidad;
     if (entidadModelo === "Vehiculo") {
@@ -92,11 +133,8 @@ exports.upload = async (req, res) => {
         });
       }
 
-      // Verificar acceso al vehículo
-      const rolesUpper = (req.user?.roles || []).map((r) => r.toUpperCase());
-      const isAdmin = rolesUpper.includes("ADMIN");
-
-      if (!isAdmin) {
+      // ADMIN y CLIENTE_ADMIN pueden crear docs de cualquier vehículo (de su empresa)
+      if (!isAdmin && !isClienteAdmin) {
         const vehiculosPermitidos = req.session?.vehiculosPermitidos || [];
         const tieneAcceso = vehiculosPermitidos.some(
           (v) => v.placa === entidad.placa || v.vehiculoId == entidadId,
@@ -118,11 +156,6 @@ exports.upload = async (req, res) => {
         });
       }
 
-      // Verificar acceso al tercero
-      const rolesUpper = (req.user?.roles || []).map((r) => r.toUpperCase());
-      const isAdmin = rolesUpper.includes("ADMIN");
-      const isClienteAdmin = rolesUpper.includes("CLIENTE_ADMIN");
-
       if (!isAdmin && !isClienteAdmin) {
         // Cliente normal solo puede crear documentos de sí mismo
         if (req.user?.terceroId?.toString() !== entidadId.toString()) {
@@ -138,6 +171,50 @@ exports.upload = async (req, res) => {
             success: false,
             message:
               "No tiene permisos para crear documentos de terceros fuera de su empresa",
+          });
+        }
+      }
+    } else if (entidadModelo === "Empresa") {
+      entidad = await Empresa.findById(entidadId);
+      if (!entidad) {
+        return res.status(404).json({
+          success: false,
+          message: "Empresa no encontrada",
+        });
+      }
+
+      // Solo ADMIN y CLIENTE_ADMIN de esa empresa pueden crear docs de empresa
+      if (!isAdmin && isClienteAdmin) {
+        if (req.user?.empresaId?.toString() !== entidadId.toString()) {
+          return res.status(403).json({
+            success: false,
+            message: "No tiene permisos para crear documentos de esta empresa",
+          });
+        }
+      } else if (!isAdmin && !isClienteAdmin) {
+        return res.status(403).json({
+          success: false,
+          message: "No tiene permisos para crear documentos de empresa",
+        });
+      }
+    }
+
+    // 1.5 Validar entidadesAsociadas (si se proporcionan)
+    const { entidadesAsociadas } = req.body;
+    if (entidadesAsociadas && entidadesAsociadas.length > 0) {
+      for (const asociada of entidadesAsociadas) {
+        let entidadAsociada;
+        if (asociada.entidadModelo === "Vehiculo") {
+          entidadAsociada = await Vehiculo.findById(asociada.entidadId);
+        } else if (asociada.entidadModelo === "Tercero") {
+          entidadAsociada = await Tercero.findById(asociada.entidadId);
+        } else if (asociada.entidadModelo === "Empresa") {
+          entidadAsociada = await Empresa.findById(asociada.entidadId);
+        }
+        if (!entidadAsociada) {
+          return res.status(404).json({
+            success: false,
+            message: `Entidad asociada no encontrada: ${asociada.entidadModelo} ${asociada.entidadId}`,
           });
         }
       }
@@ -173,6 +250,7 @@ exports.getAll = async (req, res) => {
       entidadModelo,
       tipoDocumento,
       estado,
+      empresaId,
       page = 1,
       limit = 50,
       includeDeleted = false,
@@ -187,6 +265,38 @@ exports.getAll = async (req, res) => {
       Object.assign(query, scope);
     }
 
+    // Filtro por empresa: resolver documentos cuya entidad pertenezca a esa empresa
+    if (empresaId) {
+      const [vehiculosEmpresa, tercerosEmpresa] = await Promise.all([
+        Vehiculo.find({ empresaAfiliadora: empresaId, deletedAt: null })
+          .select("_id")
+          .lean(),
+        Tercero.find({ empresa: empresaId, deletedAt: null })
+          .select("_id")
+          .lean(),
+      ]);
+
+      const vIds = vehiculosEmpresa.map((v) => v._id);
+      const tIds = tercerosEmpresa.map((t) => t._id);
+
+      const empresaFilter = {
+        $or: [
+          { entidadModelo: "Vehiculo", entidadId: { $in: vIds } },
+          { entidadModelo: "Tercero", entidadId: { $in: tIds } },
+          { entidadModelo: "Empresa", entidadId: empresaId },
+          { "entidadesAsociadas.entidadId": { $in: vIds } },
+        ],
+      };
+
+      // Combinar con scope existente (que puede tener su propio $or)
+      if (query.$or) {
+        query.$and = [{ $or: query.$or }, { $or: empresaFilter.$or }];
+        delete query.$or;
+      } else {
+        Object.assign(query, empresaFilter);
+      }
+    }
+
     // Filtros opcionales
     if (entidadId) {
       query.entidadId = entidadId;
@@ -197,18 +307,24 @@ exports.getAll = async (req, res) => {
     if (tipoDocumento) {
       query.tipoDocumento = tipoDocumento;
     }
-    if (estado) {
-      query.estado = estado;
-    }
+
+    // El filtro por estado se aplica después del recálculo en tiempo real
+    const filtroEstado = estado || null;
 
     // Soft delete: por defecto excluir eliminados
     if (!includeDeleted || includeDeleted === "false") {
       query.deletedAt = null;
     }
 
+    // Si hay filtro de estado, lo usamos en la query como hint pero luego
+    // re-filtramos después del recálculo para mayor precisión
+    if (filtroEstado) {
+      query.estado = filtroEstado;
+    }
+
     // Ejecutar consulta con paginación
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    const documentos = await Documento.find(query)
+    let documentos = await Documento.find(query)
       .sort({ fechaVencimiento: 1 })
       .limit(parseInt(limit))
       .skip(skip)
@@ -216,7 +332,18 @@ exports.getAll = async (req, res) => {
       .populate("subidoPor", "username")
       .lean();
 
-    const total = await Documento.countDocuments(query);
+    // Recalcular estado en tiempo real según fechaVencimiento
+    documentos = documentos.map(recalcularEstado);
+
+    // Si se pidió filtrar por estado, re-filtrar después del recálculo
+    // (un doc guardado como VIGENTE pudo haber cambiado a VENCIDO)
+    if (filtroEstado) {
+      documentos = documentos.filter((d) => d.estado === filtroEstado);
+    }
+
+    const total = filtroEstado
+      ? await Documento.countDocuments(query) // Aproximado; el conteo exacto requeriría recalcular todos
+      : await Documento.countDocuments(query);
 
     res.json({
       success: true,
@@ -246,7 +373,10 @@ exports.getByEntity = async (req, res) => {
     const { includeDeleted = false } = req.query;
 
     const query = {
-      entidadId,
+      $or: [
+        { entidadId },
+        { "entidadesAsociadas.entidadId": entidadId },
+      ],
       deletedAt: includeDeleted === "true" ? { $ne: null } : null,
     };
 
@@ -263,10 +393,13 @@ exports.getByEntity = async (req, res) => {
       }
     }
 
-    const documentos = await Documento.find(query)
+    let documentos = await Documento.find(query)
       .sort({ fechaVencimiento: 1 })
       .populate("subidoPor", "username")
       .lean();
+
+    // Recalcular estado en tiempo real
+    documentos = documentos.map(recalcularEstado);
 
     res.json({
       success: true,
@@ -316,6 +449,9 @@ exports.getOne = async (req, res) => {
         });
       }
     }
+
+    // Recalcular estado en tiempo real
+    recalcularEstado(documento);
 
     res.json({
       success: true,
@@ -422,8 +558,7 @@ exports.softDelete = async (req, res) => {
  */
 exports.hardDelete = async (req, res) => {
   try {
-    const rolesUpper = (req.user?.roles || []).map((r) => r.toUpperCase());
-    const isAdmin = rolesUpper.includes("ADMIN");
+    const { isAdmin } = getRoles(req);
 
     if (!isAdmin) {
       return res.status(403).json({
@@ -434,7 +569,7 @@ exports.hardDelete = async (req, res) => {
     }
 
     const { id } = req.params;
-    const documento = await Documento.findByIdAndDelete(id);
+    const documento = await Documento.findById(id);
 
     if (!documento) {
       return res.status(404).json({
@@ -442,6 +577,18 @@ exports.hardDelete = async (req, res) => {
         message: "Documento no encontrado",
       });
     }
+
+    // Eliminar archivos de S3
+    const keysToDelete = [];
+    if (documento.archivo?.key) keysToDelete.push(documento.archivo.key);
+    if (documento.archivoReverso?.key) keysToDelete.push(documento.archivoReverso.key);
+
+    if (keysToDelete.length > 0) {
+      await Promise.all(keysToDelete.map((key) => s3Service.deleteObject(key)));
+      logger.info(`S3: eliminados ${keysToDelete.length} archivo(s) del documento ${id}`);
+    }
+
+    await documento.deleteOne();
 
     res.json({
       success: true,
@@ -499,6 +646,36 @@ exports.restore = async (req, res) => {
     });
   } catch (error) {
     logger.error(`Error restaurando documento: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+/**
+ * Generar presigned URL para subir archivo a S3
+ */
+exports.getPresignedUrl = async (req, res) => {
+  try {
+    const { fileName, mimeType, folder } = req.body;
+
+    if (!fileName || !mimeType) {
+      return res.status(400).json({
+        success: false,
+        message: "fileName y mimeType son obligatorios",
+      });
+    }
+
+    const data = await s3Service.generatePresignedUrl({
+      fileName,
+      mimeType,
+      folder,
+    });
+
+    res.json({ success: true, data });
+  } catch (error) {
+    logger.error(`Error generando presigned URL: ${error.message}`);
     res.status(500).json({
       success: false,
       message: error.message,

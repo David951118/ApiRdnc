@@ -19,12 +19,22 @@ router.post(
 // Listar con filtros (según scope del token)
 router.get("/", authenticate, preoperacionalController.getAll);
 
+// Validar hoja de vida antes de crear preoperacional
+router.get(
+  "/validar/:vehiculoId/:conductorId",
+  authenticate,
+  preoperacionalController.validarHojaDeVida,
+);
+
 // Listar por vehículo (debe ir antes de /:id)
 router.get(
   "/vehiculo/:vehiculoId",
   authenticate,
   preoperacionalController.getByVehiculo,
 );
+
+// Obtener datos QR de una preoperacional
+router.get("/:id/qr", authenticate, preoperacionalController.getQR);
 
 // Obtener uno por ID
 router.get("/:id", authenticate, preoperacionalController.getOne);

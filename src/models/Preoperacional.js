@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const crypto = require("crypto");
 const { Schema } = mongoose;
 
 const ItemRevisionSchema = new Schema(
@@ -18,6 +19,8 @@ const PreoperacionalSchema = new Schema(
   {
     vehiculo: { type: Schema.Types.ObjectId, ref: "Vehiculo", required: true },
     conductor: { type: Schema.Types.ObjectId, ref: "Tercero", required: true }, // Quien realiza
+    codigoPublico: { type: String, unique: true, sparse: true }, // Token para verificación QR
+    contadorQR: { type: Number, default: 0 }, // Veces que se ha consultado el QR
     fecha: { type: Date, default: Date.now },
     kilometraje: Number,
 
@@ -66,7 +69,7 @@ const PreoperacionalSchema = new Schema(
 
     // Soft Delete
     deletedAt: { type: Date, default: null },
-    eliminadoPor: { type: Schema.Types.ObjectId, ref: "User" },
+    eliminadoPor: { type: String },
   },
   { timestamps: true },
 );
@@ -74,6 +77,13 @@ const PreoperacionalSchema = new Schema(
 PreoperacionalSchema.index({ vehiculo: 1, fecha: -1 });
 PreoperacionalSchema.index({ conductor: 1, fecha: -1 });
 PreoperacionalSchema.index({ deletedAt: 1 });
+
+// Auto-generar codigoPublico al crear
+PreoperacionalSchema.pre("save", async function () {
+  if (this.isNew && !this.codigoPublico) {
+    this.codigoPublico = crypto.randomBytes(16).toString("hex");
+  }
+});
 
 PreoperacionalSchema.methods.softDelete = async function (userId) {
   this.deletedAt = new Date();

@@ -2,6 +2,8 @@
 
 Bienvenido al sistema de monitoreo de manifiestos RNDC. Esta guía le ayudará a usar la plataforma para supervisar el estado de su flota y el cumplimiento de los reportes al Ministerio de Transporte.
 
+Todo, declaro bajo la gravedad del juramento, que los datos digitales registrados en este documento corresponden a la verdad
+
 ##  Acceso al Sistema
 
 1.  Ingrese a la dirección web proporcionada por soporte (ej. `https://www.asegurar.com.co/rndc`).

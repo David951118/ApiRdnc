@@ -3,6 +3,7 @@ const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
 const connectDB = require("./config/database");
+const logger = require("./config/logger");
 
 // Importar rutas
 const indexRoutes = require("./routes/index");
@@ -16,12 +17,45 @@ const { authenticate } = require("./middleware/auth");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const isProduction = process.env.NODE_ENV === "production";
 
-// Middleware
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(morgan("dev"));
+// ── Validación de variables de entorno requeridas ──
+const requiredEnvVars = [
+  "MONGODB_URI",
+  "JWT_SECRET",
+  "CELLVI_API_URL",
+  "CELLVI_USERNAME",
+  "CELLVI_PASSWORD",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "S3_BUCKET_NAME",
+];
+const missing = requiredEnvVars.filter((v) => !process.env[v]);
+if (missing.length > 0) {
+  console.error(
+    `❌ Variables de entorno faltantes: ${missing.join(", ")}\nRevisa tu archivo .env`,
+  );
+  process.exit(1);
+}
+
+// ── Middleware ──
+
+// CORS: en producción solo permite orígenes de la whitelist
+const corsOptions = isProduction
+  ? {
+      origin: process.env.ALLOWED_ORIGINS
+        ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
+        : [],
+      credentials: true,
+    }
+  : {}; // En desarrollo: todo abierto
+
+app.use(cors(corsOptions));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+
+// Logging: formato compacto en producción, detallado en desarrollo
+app.use(morgan(isProduction ? "combined" : "dev"));
 
 // Servir archivos estáticos
 app.use(express.static("public"));
@@ -32,10 +66,11 @@ connectDB().then(() => {
   require("./workers/syncManifiestos").init();
   require("./workers/monitorVehiculos");
   require("./workers/reportRMM");
-  require("./workers/detectRNMM"); // Detectar casos para RNMM
-  require("./workers/reportRNMM"); // Reportar RNMM al RNDC
+  require("./workers/detectRNMM");
+  require("./workers/reportRNMM");
+  require("./workers/actualizarEstadoDocumentos");
 
-  console.log("Workers initialized successfully");
+  logger.info("Workers initialized successfully");
 });
 
 // Health Check Endpoint (para monitoreo) - SIN autenticación
@@ -47,12 +82,12 @@ app.get("/health", (req, res) => {
     mongodb:
       mongoose.connection.readyState === 1 ? "connected" : "disconnected",
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV,
   });
 });
 
 // Routes públicas (sin autenticación)
-app.use("/api/auth", authRoutes); // Login, logout, etc.
+app.use("/api/auth", authRoutes);
+app.use("/api/verificar", require("./routes/verificacion"));
 
 // Routes protegidas (requieren autenticación)
 app.use("/api", authenticate, indexRoutes);
@@ -82,35 +117,29 @@ app.use((req, res) => {
 });
 
 // Global Error Handler
-// Global Error Handler
 app.use(require("./middleware/errorHandler"));
 
 // Process Error Handlers para producción
-process.on("unhandledRejection", (reason, promise) => {
-  const logger = require("./config/logger");
+process.on("unhandledRejection", (reason) => {
   logger.error("Unhandled Rejection:", reason);
 });
 
 process.on("uncaughtException", (error) => {
-  const logger = require("./config/logger");
   logger.error("Uncaught Exception:", error);
   process.exit(1);
 });
 
 // Graceful Shutdown
 process.on("SIGTERM", () => {
-  console.log("SIGTERM received, closing gracefully...");
+  logger.info("SIGTERM received, closing gracefully...");
   server.close(() => {
-    console.log("Process terminated");
     process.exit(0);
   });
 });
 
 // Start Server
 const server = app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV}`);
-  console.log(`URL: http://localhost:${PORT}`);
+  logger.info(`Server running on port ${PORT} [${process.env.NODE_ENV}]`);
 });
 
 module.exports = app;

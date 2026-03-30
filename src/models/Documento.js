@@ -4,7 +4,8 @@ const { Schema } = mongoose;
 /**
  * Documento
  * Repositorio centralizado de soportes digitales con control de vigencia.
- * Polimórfico: Sirve para Vehículos (SOAT) y Terceros (Licencias).
+ * Polimórfico: Sirve para Vehículos, Terceros y Empresas.
+ * Soporta asociación multi-entidad vía entidadesAsociadas.
  */
 const DocumentoSchema = new Schema(
   {
@@ -17,8 +18,25 @@ const DocumentoSchema = new Schema(
     entidadModelo: {
       type: String,
       required: true,
-      enum: ["Vehiculo", "Tercero"],
+      enum: ["Vehiculo", "Tercero", "Empresa"],
     },
+
+    // Entidades adicionales asociadas a este documento
+    // Ejemplo: Una POLIZA_RCE de la Empresa que cubre múltiples Vehículos
+    entidadesAsociadas: [
+      {
+        entidadId: {
+          type: Schema.Types.ObjectId,
+          required: true,
+          refPath: "entidadesAsociadas.entidadModelo",
+        },
+        entidadModelo: {
+          type: String,
+          required: true,
+          enum: ["Vehiculo", "Tercero", "Empresa"],
+        },
+      },
+    ],
 
     // Tipo de Documento
     tipoDocumento: {
@@ -26,25 +44,27 @@ const DocumentoSchema = new Schema(
       required: true,
       enum: [
         // Vehículos
-        "SOAT", // no tiene
+        "SOAT",
         "TECNOMECANICA",
-        "POLIZA_RCE", // Contractualresponsabilidad civil extra colectivas
-        "POLIZA_RCC", // Extracontractual responsabilidad civil colectivas
-        "TARJETA_OPERACION", // individual vehiculos
+        "POLIZA_RCE",
+        "POLIZA_RCC",
+        "TARJETA_OPERACION",
         "TARJETA_PROPIEDAD",
-        "REVISION_PREVENTIVA",// tecnomecanica
-        // Personas (Conductores)
+        "REVISION_PREVENTIVA",
+        // Terceros (Conductores/Personas)
         "LICENCIA_CONDUCCION",
-        "CEDULA", //no tiene 
+        "CEDULA",
         "ARL",
-        "EPS", // todo caja de compensansion familiar 
-        "FONDO_PENSIONES", // numero de planilla opcinal
-        "EXAMEN_MEDICO", // agregar el numero de planilla como copnal pila agregar observaciones
-        "CAPACITACION_PESV",// no tiene
-        // Contratos
-        "CONTRATO_CLIENTE",// empresa
-        "RUT", // varios personas
-        "CAMARA_COMERCIO",// empresa revisar esta parte, 
+        "EPS",
+        "CAJA_COMPENSACION",
+        "FONDO_PENSIONES",
+        "EXAMEN_MEDICO",
+        "CAPACITACION_PESV",
+        // Empresa
+        "CONTRATO_CLIENTE",
+        "CAMARA_COMERCIO",
+        // Compartidos
+        "RUT",
         "OTROS",
       ],
     },
@@ -55,12 +75,21 @@ const DocumentoSchema = new Schema(
 
     // Vigencia (Vital para Semáforo)
     fechaExpedicion: Date,
-    fechaVencimiento: { type: Date, index: true },
+    fechaVencimiento: { type: Date },
 
-    // Archivo Físico
+    // Archivo Físico (frente / principal)
     archivo: {
-      url: { type: String, required: true }, // URL pública/firmada
-      key: { type: String }, // ID en S3/MinIO
+      url: { type: String, required: true },
+      key: { type: String },
+      mimeType: String,
+      nombreOriginal: String,
+      pesoBytes: Number,
+    },
+
+    // Archivo reverso / segunda página (opcional, ej: cédula reverso)
+    archivoReverso: {
+      url: { type: String },
+      key: { type: String },
       mimeType: String,
       nombreOriginal: String,
       pesoBytes: Number,
@@ -93,6 +122,7 @@ DocumentoSchema.index({ entidadId: 1, tipoDocumento: 1 }); // "Dame el SOAT del 
 DocumentoSchema.index({ fechaVencimiento: 1 }); // "Dame lo que vence mañana"
 DocumentoSchema.index({ estado: 1 });
 DocumentoSchema.index({ deletedAt: 1 }); // Para filtrar documentos eliminados
+DocumentoSchema.index({ "entidadesAsociadas.entidadId": 1 }); // "Documentos asociados al vehículo X"
 
 // Hook pre-save: Calcular estado automáticamente según fechaVencimiento
 DocumentoSchema.pre("save", async function () {
@@ -133,7 +163,3 @@ DocumentoSchema.query.notDeleted = function () {
 const Documento = mongoose.model("Documento", DocumentoSchema);
 
 module.exports = Documento;
-
-
-
-//Todo, terinar los documentos, las estdisticas del inicio, y  la valdiacion se hace displayada, que lo haga el backend, documentos vigentes, eliminacion de documentos.

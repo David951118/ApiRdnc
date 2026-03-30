@@ -21,6 +21,14 @@ router.post(
 // Listar
 router.get("/", authenticate, terceroController.getAll);
 
+// Listado resumido para selectores
+router.get(
+  "/list",
+  authenticate,
+  checkRole(["ADMIN", "CLIENTE_ADMIN"]),
+  terceroController.getList,
+);
+
 // Por empresa
 router.get(
   "/empresa/:empresaId",

@@ -23,9 +23,9 @@ const RutaSchema = new Schema(
 
     activo: { type: Boolean, default: true },
     empresa: { type: Schema.Types.ObjectId, ref: "Empresa", index: true },
-    creadoPor: { type: Schema.Types.ObjectId, ref: "User" },
+    creadoPor: { type: String },
     deletedAt: { type: Date, default: null },
-    deletedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    deletedBy: { type: String, default: null },
   },
   { timestamps: true },
 );

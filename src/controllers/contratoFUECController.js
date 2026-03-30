@@ -5,10 +5,12 @@ const Documento = require("../models/Documento");
 const logger = require("../config/logger");
 
 function getRoles(req) {
-  const rolesUpper = (req.user?.roles || []).map((r) => r.toUpperCase());
+  const rolesNormalized = (req.user?.roles || []).map((r) =>
+    r.replace("ROLE_", "").toUpperCase(),
+  );
   return {
-    isAdmin: rolesUpper.includes("ADMIN"),
-    isClienteAdmin: rolesUpper.includes("CLIENTE_ADMIN"),
+    isAdmin: rolesNormalized.includes("ADMIN"),
+    isClienteAdmin: rolesNormalized.includes("CLIENTE_ADMIN"),
   };
 }
 
@@ -22,6 +24,135 @@ async function getVehiculosScope(req) {
     .lean();
   return vehiculos.map((v) => v._id);
 }
+
+/**
+ * Obtener datos QR de un contrato
+ * GET /api/contratos/:id/qr
+ * Retorna la info necesaria para generar el QR y la URL de verificación pública.
+ */
+exports.getQR = async (req, res) => {
+  try {
+    const contrato = await ContratoFuec.findOne({
+      _id: req.params.id,
+      deletedAt: null,
+    })
+      .populate(
+        "vehiculo",
+        "placa numeroInterno marca linea modelo capacidadPasajeros empresaAfiliadora",
+      )
+      .populate("conductorPrincipal", "nombres apellidos identificacion")
+      .populate("contratante", "razonSocial nombres apellidos identificacion")
+      .populate("ruta", "nombre origen destino recorrido")
+      .lean();
+
+    if (!contrato) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Contrato no encontrado" });
+    }
+
+    // Obtener empresa
+    const Empresa = require("../models/Empresa");
+    let empresa = null;
+    if (contrato.vehiculo?.empresaAfiliadora) {
+      empresa = await Empresa.findOne({
+        _id: contrato.vehiculo.empresaAfiliadora,
+        deletedAt: null,
+      })
+        .select("razonSocial nit contacto representanteLegal branding")
+        .lean();
+    }
+
+    res.json({
+      success: true,
+      data: {
+        qrCodeData: contrato.qrCodeData,
+        qrVerificationUrl: `/api/verificar/contrato/${contrato.qrCodeData}`,
+        contadorQR: contrato.contadorQR,
+        consecutivo: contrato.consecutivo,
+        numeroFUEC: contrato.numeroFUEC,
+        anio: contrato.anio,
+        estado: contrato.estado,
+        objetoContrato: contrato.objetoContrato,
+        origen: contrato.origen,
+        destino: contrato.destino,
+        vigenciaInicio: contrato.vigenciaInicio,
+        vigenciaFin: contrato.vigenciaFin,
+        vehiculo: contrato.vehiculo
+          ? {
+              placa: contrato.vehiculo.placa,
+              numeroInterno: contrato.vehiculo.numeroInterno,
+              marca: contrato.vehiculo.marca,
+              linea: contrato.vehiculo.linea,
+              modelo: contrato.vehiculo.modelo,
+              capacidadPasajeros: contrato.vehiculo.capacidadPasajeros,
+            }
+          : null,
+        conductorPrincipal: contrato.conductorPrincipal
+          ? {
+              nombres: contrato.conductorPrincipal.nombres,
+              apellidos: contrato.conductorPrincipal.apellidos,
+              identificacion: contrato.conductorPrincipal.identificacion,
+            }
+          : null,
+        contratante: contrato.contratante
+          ? {
+              razonSocial: contrato.contratante.razonSocial,
+              nombres: contrato.contratante.nombres,
+              apellidos: contrato.contratante.apellidos,
+              identificacion: contrato.contratante.identificacion,
+            }
+          : null,
+        ruta: contrato.ruta
+          ? {
+              nombre: contrato.ruta.nombre,
+              origen: contrato.ruta.origen,
+              destino: contrato.ruta.destino,
+              recorrido: contrato.ruta.recorrido,
+            }
+          : null,
+        empresa: empresa
+          ? {
+              razonSocial: empresa.razonSocial,
+              nit: empresa.nit,
+              contacto: empresa.contacto,
+              representanteLegal: empresa.representanteLegal,
+              branding: empresa.branding,
+            }
+          : null,
+        datosSnapshot: contrato.datosSnapshot,
+        creadoEn: contrato.createdAt,
+      },
+    });
+  } catch (error) {
+    logger.error(`Error obteniendo QR de contrato: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Verificar si un consecutivo ya existe
+ * GET /api/contratos/verificar-consecutivo/:consecutivo
+ */
+exports.verificarConsecutivo = async (req, res) => {
+  try {
+    const { consecutivo } = req.params;
+    const existe = await ContratoFuec.findOne({
+      consecutivo: Number(consecutivo),
+    })
+      .select("consecutivo estado createdAt")
+      .lean();
+
+    res.json({
+      success: true,
+      existe: !!existe,
+      data: existe || null,
+    });
+  } catch (error) {
+    logger.error(`Error verificando consecutivo: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
 
 /**
  * Crear Contrato FUEC (ADMIN o CLIENTE_ADMIN)
@@ -166,7 +297,10 @@ exports.create = async (req, res) => {
       .populate("contratante", "razonSocial nombres apellidos")
       .populate("ruta");
 
-    res.status(201).json({ success: true, data: populated });
+    const responseData = populated ? populated.toObject() : contrato.toObject();
+    responseData.qrVerificationUrl = `/api/verificar/contrato/${responseData.qrCodeData}`;
+
+    res.status(201).json({ success: true, data: responseData });
   } catch (error) {
     logger.error(`Error creando contrato: ${error.message}`);
     res.status(400).json({ success: false, message: error.message });
@@ -378,17 +512,11 @@ exports.restore = async (req, res) => {
   }
 };
 
-// Hard Delete (Solo ADMIN)
+// Hard Delete — PROHIBIDO por regulación RNDC
 exports.hardDelete = async (req, res) => {
-  try {
-    const contrato = await ContratoFuec.findByIdAndDelete(req.params.id);
-    if (!contrato)
-      return res
-        .status(404)
-        .json({ success: false, message: "Contrato no encontrado" });
-    res.json({ success: true, message: "Contrato eliminado permanentemente" });
-  } catch (error) {
-    logger.error(`Error hard-delete contrato: ${error.message}`);
-    res.status(500).json({ success: false, message: error.message });
-  }
+  return res.status(403).json({
+    success: false,
+    message:
+      "Los contratos FUEC no pueden eliminarse permanentemente por regulación RNDC. Use eliminación temporal (soft delete).",
+  });
 };

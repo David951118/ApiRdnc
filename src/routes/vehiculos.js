@@ -21,6 +21,14 @@ router.post(
 // Listar
 router.get("/", authenticate, vehiculoController.getAll);
 
+// Listado resumido para selectores
+router.get(
+  "/list",
+  authenticate,
+  checkRole(["ADMIN", "CLIENTE_ADMIN"]),
+  vehiculoController.getList,
+);
+
 // Obtener lista por idCellvi
 router.get("/cellvi/:idCellvi", authenticate, vehiculoController.getByCellviId);
 

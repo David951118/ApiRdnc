@@ -16,51 +16,39 @@ const createTercero = Joi.object({
 
   empresa: Joi.string().allow(null), // ObjectId como string
 
-  // Datos Personales (Requeridos si NO es NIT o si tiene empresa)
+  // Persona natural (CC/CE/PEP/PASAPORTE) → nombres + apellidos obligatorios
+  // Persona jurídica (NIT) → opcionales (puede ser empresa cliente/proveedor)
   nombres: Joi.string()
     .trim()
     .when("tipoId", {
-      is: Joi.not("NIT"),
+      is: Joi.valid("CC", "CE", "PEP", "PASAPORTE"),
       then: Joi.required(),
-      otherwise: Joi.when("empresa", {
-        is: Joi.exist(),
-        then: Joi.required(), // Si tiene empresa, siempre requerido
-      }),
+      otherwise: Joi.optional().allow("", null),
     })
     .messages({
-      "any.required": "Nombres son obligatorios para personas",
+      "any.required": "Nombres son obligatorios para personas naturales",
     }),
 
   apellidos: Joi.string()
     .trim()
     .when("tipoId", {
-      is: Joi.not("NIT"),
+      is: Joi.valid("CC", "CE", "PEP", "PASAPORTE"),
       then: Joi.required(),
-      otherwise: Joi.when("empresa", {
-        is: Joi.exist(),
-        then: Joi.required(),
-      }),
+      otherwise: Joi.optional().allow("", null),
     })
     .messages({
-      "any.required": "Apellidos son obligatorios para personas",
+      "any.required": "Apellidos son obligatorios para personas naturales",
     }),
 
-  // Razón Social: Solo si es NIT SIN empresa
+  // Persona jurídica (NIT) → razonSocial obligatoria
   razonSocial: Joi.string()
     .trim()
     .when("tipoId", {
       is: "NIT",
-      then: Joi.when("empresa", {
-        is: Joi.exist(),
-        then: Joi.forbidden().messages({
-          "any.unknown":
-            "No se debe enviar Razón Social si tiene empresa asociada",
-        }),
-        otherwise: Joi.required().messages({
-          "any.required":
-            "Razón Social es obligatoria para empresas independientes",
-        }),
+      then: Joi.required().messages({
+        "any.required": "Razón Social es obligatoria para NIT",
       }),
+      otherwise: Joi.optional().allow("", null),
     }),
 
   fotoUrl: Joi.string().uri().allow(null, ""),
