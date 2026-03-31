@@ -40,17 +40,22 @@ if (missing.length > 0) {
 
 // ── Middleware ──
 
-// CORS: en producción solo permite orígenes de la whitelist
-const corsOptions = isProduction
-  ? {
-      origin: process.env.ALLOWED_ORIGINS
-        ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
-        : [],
-      credentials: true,
-    }
-  : {}; // En desarrollo: todo abierto
+// CORS:
+// - Si ALLOWED_ORIGINS está vacío/ausente: desactivado (Apache/Nginx lo maneja)
+// - Si ALLOWED_ORIGINS tiene valores: Node.js lo maneja con whitelist
+// - En desarrollo (sin NODE_ENV=production): todo abierto
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(",")
+      .map((o) => o.trim())
+      .filter(Boolean)
+  : [];
 
-app.use(cors(corsOptions));
+if (!isProduction) {
+  app.use(cors()); // Desarrollo: todo abierto
+} else if (allowedOrigins.length > 0) {
+  app.use(cors({ origin: allowedOrigins, credentials: true })); // Producción: whitelist
+}
+// Si producción + sin ALLOWED_ORIGINS: no se usa cors() → Apache lo maneja
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
