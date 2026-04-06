@@ -51,7 +51,10 @@ const createTercero = Joi.object({
       otherwise: Joi.optional().allow("", null),
     }),
 
-  fotoUrl: Joi.string().uri().allow(null, ""),
+  foto: Joi.object({
+    url: Joi.string().uri().required(),
+    key: Joi.string().required(),
+  }).allow(null),
 
   // Roles
   roles: Joi.array()

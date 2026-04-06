@@ -73,13 +73,11 @@ const createPreoperacional = Joi.object({
   seccionMedia,
   seccionTrasera,
 
+  // estadoGeneral se calcula automáticamente en el pre-save:
+  // sin FALLAS → APROBADO, con FALLAS → NOVEDAD
   estadoGeneral: Joi.string()
-    .valid("APROBADO", "RECHAZADO")
-    .required()
-    .messages({
-      "any.only": "estadoGeneral debe ser APROBADO o RECHAZADO",
-      "any.required": "El estado general es obligatorio",
-    }),
+    .valid("APROBADO", "NOVEDAD", "RECHAZADO")
+    .optional(),
 
   firmadoCheck: Joi.boolean().optional(),
   firmaConductorUrl: Joi.string().uri().allow("", null).optional(),

@@ -19,6 +19,9 @@ router.post(
 // Listar con filtros (según scope del token)
 router.get("/", authenticate, preoperacionalController.getAll);
 
+// Listar preoperacionales con novedades pendientes
+router.get("/novedades", authenticate, preoperacionalController.getNovedadesPendientes);
+
 // Validar hoja de vida antes de crear preoperacional
 router.get(
   "/validar/:vehiculoId/:conductorId",
@@ -31,6 +34,13 @@ router.get(
   "/vehiculo/:vehiculoId",
   authenticate,
   preoperacionalController.getByVehiculo,
+);
+
+// Resolver una novedad (subir foto de corrección)
+router.put(
+  "/:id/novedades/:novedadId/resolver",
+  authenticate,
+  preoperacionalController.resolverNovedad,
 );
 
 // Obtener datos QR de una preoperacional

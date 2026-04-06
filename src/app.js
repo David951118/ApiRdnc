@@ -74,6 +74,7 @@ connectDB().then(() => {
   require("./workers/detectRNMM");
   require("./workers/reportRNMM");
   require("./workers/actualizarEstadoDocumentos");
+  require("./workers/vencerNovedadesPreop");
 
   logger.info("Workers initialized successfully");
 });

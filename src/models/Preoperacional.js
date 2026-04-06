@@ -15,6 +15,20 @@ const ItemRevisionSchema = new Schema(
   { _id: false },
 );
 
+const NovedadSchema = new Schema(
+  {
+    item: { type: String, required: true }, // Ej: "seccionDelantera.limpiabrisas"
+    descripcion: String, // Descripción del fallo original
+    fotoFalla: String, // Foto original de la falla
+    fotoCorreccion: String, // Foto subida al corregir
+    fechaLimite: { type: Date, required: true }, // Fecha máxima para corregir (creación + 15 días)
+    resuelta: { type: Boolean, default: false },
+    fechaResolucion: Date,
+    resueltaPor: String, // userId que resolvió
+  },
+  { _id: true },
+);
+
 const PreoperacionalSchema = new Schema(
   {
     vehiculo: { type: Schema.Types.ObjectId, ref: "Vehiculo", required: true },
@@ -61,9 +75,14 @@ const PreoperacionalSchema = new Schema(
     // Resultado Global
     estadoGeneral: {
       type: String,
-      enum: ["APROBADO", "RECHAZADO"],
-      required: true,
+      enum: ["APROBADO", "NOVEDAD", "RECHAZADO"],
+      default: "APROBADO",
     },
+
+    // Novedades (items con FALLA que requieren corrección)
+    novedades: [NovedadSchema],
+    fechaLimiteNovedades: Date, // Fecha máxima global (creación + 15 días)
+
     firmadoCheck: Boolean,
     firmaConductorUrl: String,
 
@@ -77,11 +96,44 @@ const PreoperacionalSchema = new Schema(
 PreoperacionalSchema.index({ vehiculo: 1, fecha: -1 });
 PreoperacionalSchema.index({ conductor: 1, fecha: -1 });
 PreoperacionalSchema.index({ deletedAt: 1 });
+PreoperacionalSchema.index({ estadoGeneral: 1, fechaLimiteNovedades: 1 }); // Para cron y consultas de novedades
 
-// Auto-generar codigoPublico al crear
+// Auto-generar codigoPublico y detectar fallas al crear
 PreoperacionalSchema.pre("save", async function () {
-  if (this.isNew && !this.codigoPublico) {
-    this.codigoPublico = crypto.randomBytes(16).toString("hex");
+  if (this.isNew) {
+    if (!this.codigoPublico) {
+      this.codigoPublico = crypto.randomBytes(16).toString("hex");
+    }
+
+    // Auto-detectar items con FALLA y generar novedades
+    const secciones = ["seccionDelantera", "seccionMedia", "seccionTrasera"];
+    const novedadesDetectadas = [];
+    const fechaLimite = new Date();
+    fechaLimite.setDate(fechaLimite.getDate() + 15);
+
+    for (const seccion of secciones) {
+      const datos = this[seccion];
+      if (!datos) continue;
+      for (const [item, valor] of Object.entries(datos.toObject ? datos.toObject() : datos)) {
+        if (valor && valor.estado === "FALLA") {
+          novedadesDetectadas.push({
+            item: `${seccion}.${item}`,
+            descripcion: valor.observaciones || `Falla en ${item}`,
+            fotoFalla: valor.fotoUrl || null,
+            fechaLimite,
+            resuelta: false,
+          });
+        }
+      }
+    }
+
+    if (novedadesDetectadas.length > 0) {
+      this.novedades = novedadesDetectadas;
+      this.fechaLimiteNovedades = fechaLimite;
+      this.estadoGeneral = "NOVEDAD";
+    } else {
+      this.estadoGeneral = "APROBADO";
+    }
   }
 });
 

@@ -1,6 +1,7 @@
 const Tercero = require("../models/Tercero");
 const ContratoFuec = require("../models/ContratoFUEC");
 const { deleteDocumentosWithS3, cleanEntidadesAsociadas } = require("../helpers/cascadeDelete");
+const s3Service = require("../services/s3Service");
 const logger = require("../config/logger");
 
 // Helper de roles inline
@@ -13,6 +14,87 @@ function getRoles(req) {
     isClienteAdmin: rolesNormalized.includes("CLIENTE_ADMIN"),
   };
 }
+
+/**
+ * Generar presigned URL para subir foto de perfil
+ * POST /api/terceros/foto/presigned-url
+ * Body: { fileName, mimeType }
+ */
+exports.getFotoPresignedUrl = async (req, res) => {
+  try {
+    const { fileName, mimeType } = req.body;
+
+    if (!fileName || !mimeType) {
+      return res.status(400).json({
+        success: false,
+        message: "fileName y mimeType son obligatorios",
+      });
+    }
+
+    const allowed = ["image/jpeg", "image/png", "image/webp"];
+    if (!allowed.includes(mimeType)) {
+      return res.status(400).json({
+        success: false,
+        message: "Solo se permiten imágenes (jpeg, png, webp)",
+      });
+    }
+
+    const data = await s3Service.generatePresignedUrl({
+      fileName,
+      mimeType,
+      folder: "fotos-perfil",
+    });
+
+    res.json({ success: true, data });
+  } catch (error) {
+    logger.error(`Error generando presigned URL para foto: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Actualizar foto de perfil de un tercero
+ * PUT /api/terceros/:id/foto
+ * Body: { url, key }
+ * Elimina la foto anterior de S3 si existe.
+ */
+exports.updateFoto = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { url, key } = req.body;
+
+    if (!url || !key) {
+      return res.status(400).json({
+        success: false,
+        message: "url y key son obligatorios",
+      });
+    }
+
+    const tercero = await Tercero.findOne({ _id: id, deletedAt: null });
+    if (!tercero) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Tercero no encontrado" });
+    }
+
+    // Eliminar foto anterior de S3 si existe
+    if (tercero.foto?.key) {
+      try {
+        await s3Service.deleteObject(tercero.foto.key);
+      } catch (err) {
+        logger.warn(`No se pudo eliminar foto anterior de S3: ${err.message}`);
+      }
+    }
+
+    tercero.foto = { url, key };
+    await tercero.save();
+
+    res.json({ success: true, data: tercero });
+  } catch (error) {
+    logger.error(`Error actualizando foto: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
 
 exports.create = async (req, res) => {
   try {
@@ -345,6 +427,15 @@ exports.hardDelete = async (req, res) => {
         success: false,
         message: `No se puede eliminar: el tercero tiene ${contratosActivos} contrato(s) activo(s). Anúlelos primero.`,
       });
+    }
+
+    // 0. Eliminar foto de perfil de S3
+    if (tercero.foto?.key) {
+      try {
+        await s3Service.deleteObject(tercero.foto.key);
+      } catch (err) {
+        logger.warn(`No se pudo eliminar foto de perfil de S3: ${err.message}`);
+      }
     }
 
     // 1. Hard delete documentos directos + limpiar S3

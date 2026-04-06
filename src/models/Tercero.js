@@ -34,7 +34,10 @@ const TerceroSchema = new Schema(
     apellidos: String, // Para persona natural
     razonSocial: String, // Para empresa
 
-    fotoUrl: String,
+    foto: {
+      url: String,
+      key: String, // S3 key para poder eliminar
+    },
 
     // Roles que cumple en el sistema (Puede tener varios)
     roles: [

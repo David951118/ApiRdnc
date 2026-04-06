@@ -528,6 +528,171 @@ exports.hardDelete = async (req, res) => {
 };
 
 /**
+ * Listar preoperacionales con novedades pendientes
+ * GET /api/preoperacionales/novedades
+ */
+exports.getNovedadesPendientes = async (req, res) => {
+  try {
+    const { page = 1, limit = 20 } = req.query;
+    const scope = await getPreoperacionalScope(req);
+
+    if (scope.vehiculo === null) {
+      return res.json({
+        success: true,
+        data: [],
+        pagination: { page: 1, limit: parseInt(limit), total: 0, pages: 0 },
+      });
+    }
+
+    const query = {
+      estadoGeneral: "NOVEDAD",
+      deletedAt: null,
+      ...scope,
+    };
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const list = await Preoperacional.find(query)
+      .sort({ fechaLimiteNovedades: 1 }) // las más urgentes primero
+      .limit(parseInt(limit))
+      .skip(skip)
+      .populate("vehiculo", "placa numeroInterno")
+      .populate("conductor", "nombres apellidos")
+      .lean();
+
+    const total = await Preoperacional.countDocuments(query);
+
+    // Agregar info de novedades pendientes vs resueltas
+    const data = list.map((p) => {
+      const pendientes = (p.novedades || []).filter((n) => !n.resuelta);
+      const resueltas = (p.novedades || []).filter((n) => n.resuelta);
+      const diasRestantes = p.fechaLimiteNovedades
+        ? Math.ceil(
+            (new Date(p.fechaLimiteNovedades) - new Date()) /
+              (1000 * 60 * 60 * 24),
+          )
+        : 0;
+      return {
+        ...p,
+        resumenNovedades: {
+          total: (p.novedades || []).length,
+          pendientes: pendientes.length,
+          resueltas: resueltas.length,
+          diasRestantes: Math.max(0, diasRestantes),
+        },
+      };
+    });
+
+    res.json({
+      success: true,
+      data,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit)),
+      },
+    });
+  } catch (error) {
+    logger.error(`Error listando novedades pendientes: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Resolver una novedad (subir foto de corrección)
+ * PUT /api/preoperacionales/:id/novedades/:novedadId/resolver
+ * Body: { fotoCorreccion: "https://s3.../foto-correccion.jpg" }
+ */
+exports.resolverNovedad = async (req, res) => {
+  try {
+    const { id, novedadId } = req.params;
+    const { fotoCorreccion } = req.body;
+
+    if (!fotoCorreccion) {
+      return res.status(400).json({
+        success: false,
+        message: "Debe subir la foto de corrección (fotoCorreccion)",
+      });
+    }
+
+    const preop = await Preoperacional.findOne({ _id: id, deletedAt: null });
+    if (!preop) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Preoperacional no encontrada" });
+    }
+
+    // Verificar acceso
+    const acceso = await tieneAccesoVehiculo(req, preop.vehiculo);
+    if (!acceso) {
+      return res.status(403).json({
+        success: false,
+        message: "No tiene permisos para esta preoperacional",
+      });
+    }
+
+    if (preop.estadoGeneral !== "NOVEDAD") {
+      return res.status(400).json({
+        success: false,
+        message: `No se pueden resolver novedades en estado ${preop.estadoGeneral}`,
+      });
+    }
+
+    // Buscar la novedad
+    const novedad = preop.novedades.id(novedadId);
+    if (!novedad) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Novedad no encontrada" });
+    }
+
+    if (novedad.resuelta) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Esta novedad ya fue resuelta" });
+    }
+
+    // Verificar que no haya pasado la fecha límite
+    if (new Date() > new Date(novedad.fechaLimite)) {
+      return res.status(400).json({
+        success: false,
+        message: "La fecha límite para resolver esta novedad ya venció",
+      });
+    }
+
+    // Resolver la novedad
+    novedad.fotoCorreccion = fotoCorreccion;
+    novedad.resuelta = true;
+    novedad.fechaResolucion = new Date();
+    novedad.resueltaPor = req.user?.userId || null;
+
+    // Verificar si TODAS las novedades están resueltas → APROBADO
+    const todasResueltas = preop.novedades.every((n) => n.resuelta);
+    if (todasResueltas) {
+      preop.estadoGeneral = "APROBADO";
+    }
+
+    await preop.save();
+
+    const populated = await Preoperacional.findById(preop._id)
+      .populate("vehiculo", "placa numeroInterno")
+      .populate("conductor", "nombres apellidos")
+      .lean();
+
+    res.json({
+      success: true,
+      message: todasResueltas
+        ? "Todas las novedades resueltas. Preoperacional APROBADA."
+        : "Novedad resuelta. Quedan novedades pendientes.",
+      data: populated,
+    });
+  } catch (error) {
+    logger.error(`Error resolviendo novedad: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
  * Validar hoja de vida del vehículo y conductor antes de crear preoperacional.
  * Retorna autorizado: true/false con errores (bloquean) y alertas (POR_VENCER).
  */

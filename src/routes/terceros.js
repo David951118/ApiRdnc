@@ -18,6 +18,13 @@ router.post(
   terceroController.create,
 );
 
+// Presigned URL para foto de perfil
+router.post(
+  "/foto/presigned-url",
+  authenticate,
+  terceroController.getFotoPresignedUrl,
+);
+
 // Listar
 router.get("/", authenticate, terceroController.getAll);
 
@@ -46,6 +53,9 @@ router.get(
 
 // Por ID o cédula
 router.get("/:id", authenticate, terceroController.getOne);
+
+// Actualizar foto de perfil
+router.put("/:id/foto", authenticate, terceroController.updateFoto);
 
 // Actualizar
 router.put(
