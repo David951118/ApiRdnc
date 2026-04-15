@@ -10,7 +10,7 @@ const ContratoFuecSchema = new Schema(
   {
     // Identificación
     consecutivo: { type: Number, unique: true, required: true }, // Ej: 450001
-    anio: { type: Number, required: true },
+    anio: { type: Number, default: () => new Date().getFullYear() },
     numeroFUEC: { type: String, unique: true, sparse: true }, // Código largo de resolución
 
     // Relaciones (Quién viaja)

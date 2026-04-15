@@ -59,6 +59,13 @@ const VehiculoSchema = new Schema(
         taller: String,
       },
     ],
+    // Preoperacional extra habilitada por admin para hoy
+    preoperacionalExtraHabilitada: {
+      fecha: Date, // Fecha para la cual se habilitó (solo ese día)
+      habilitadoPor: String, // userId del admin que habilitó
+      motivo: String,
+    },
+
     deletedAt: { type: Date, default: null },
     deletedBy: { type: String, default: null },
   },

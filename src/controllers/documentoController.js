@@ -582,6 +582,7 @@ exports.hardDelete = async (req, res) => {
     const keysToDelete = [];
     if (documento.archivo?.key) keysToDelete.push(documento.archivo.key);
     if (documento.archivoReverso?.key) keysToDelete.push(documento.archivoReverso.key);
+    if (documento.archivoExtra?.key) keysToDelete.push(documento.archivoExtra.key);
 
     if (keysToDelete.length > 0) {
       await Promise.all(keysToDelete.map((key) => s3Service.deleteObject(key)));

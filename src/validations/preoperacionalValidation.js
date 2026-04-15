@@ -1,23 +1,37 @@
 const Joi = require("joi");
 
-// Ítem de revisión (común a todas las secciones)
+// Ítem de revisión (común a todas las secciones del vehículo)
 const itemRevision = Joi.object({
   estado: Joi.string()
-    .valid("OK", "FALLA", "NO_APLICA")
+    .valid("BUENO", "REGULAR", "MALO")
     .required()
     .messages({
-      "any.only": "estado debe ser OK, FALLA o NO_APLICA",
+      "any.only": "estado debe ser BUENO, REGULAR o MALO",
       "any.required": "El estado del ítem es obligatorio",
     }),
   observaciones: Joi.string().allow("", null),
   fotoUrl: Joi.string().uri().allow("", null),
 });
 
+// Sección conductor (condiciones de salud y aptitud)
+const seccionConductor = Joi.object({
+  horasSueno: Joi.number().min(0).max(24).allow(null),
+  selfieUrl: Joi.string().uri().allow("", null),
+  selfieFecha: Joi.date().allow(null),
+  estadoSalud: Joi.string().valid("BUENO", "REGULAR", "MALO").allow(null),
+  estadoSaludObservaciones: Joi.string().allow("", null),
+  tomaMedicamentos: Joi.boolean().default(false),
+  medicamentosDetalle: Joi.string().allow("", null),
+  consumoSustancias: Joi.boolean().default(false),
+  sustanciasDetalle: Joi.string().allow("", null),
+}).optional();
+
 // Sección delantera
 const seccionDelantera = Joi.object({
   luces: itemRevision,
   direccionalesDelanteros: itemRevision,
   limpiabrisas: itemRevision,
+  parabrisas: itemRevision,
   espejosRetrovisores: itemRevision,
   liquidos: itemRevision,
   llantaDelanteraDerecha: itemRevision,
@@ -34,7 +48,7 @@ const seccionMedia = Joi.object({
   pedales: itemRevision,
   frenoMano: itemRevision,
   bateria: itemRevision,
-  kitCarretera: itemRevision,
+  kitPrimerosAuxilios: itemRevision,
   reflectivos: itemRevision,
 }).optional();
 
@@ -47,6 +61,8 @@ const seccionTrasera = Joi.object({
   llantaTraseraIzquierda: itemRevision,
   direccionalesTraseros: itemRevision,
   placa: itemRevision,
+  extintor: itemRevision,
+  herramienta: itemRevision,
 }).optional();
 
 const createPreoperacional = Joi.object({
@@ -69,12 +85,12 @@ const createPreoperacional = Joi.object({
   fecha: Joi.date().optional(),
   kilometraje: Joi.number().min(0).allow(null),
 
+  seccionConductor,
   seccionDelantera,
   seccionMedia,
   seccionTrasera,
 
-  // estadoGeneral se calcula automáticamente en el pre-save:
-  // sin FALLAS → APROBADO, con FALLAS → NOVEDAD
+  // estadoGeneral se calcula automáticamente en el pre-save
   estadoGeneral: Joi.string()
     .valid("APROBADO", "NOVEDAD", "RECHAZADO")
     .optional(),
@@ -84,7 +100,7 @@ const createPreoperacional = Joi.object({
 });
 
 const updatePreoperacional = createPreoperacional.fork(
-  ["vehiculo", "conductor", "estadoGeneral"],
+  ["vehiculo", "conductor"],
   (schema) => schema.optional(),
 );
 

@@ -8,7 +8,7 @@ const logger = require("../config/logger");
  * @returns {{ deletedCount: number, s3Deleted: number }}
  */
 async function deleteDocumentosWithS3(filter) {
-  const documentos = await Documento.find(filter).select("archivo archivoReverso").lean();
+  const documentos = await Documento.find(filter).select("archivo archivoReverso archivoExtra").lean();
 
   if (documentos.length === 0) return { deletedCount: 0, s3Deleted: 0 };
 
@@ -17,6 +17,7 @@ async function deleteDocumentosWithS3(filter) {
   for (const doc of documentos) {
     if (doc.archivo?.key) s3Keys.push(doc.archivo.key);
     if (doc.archivoReverso?.key) s3Keys.push(doc.archivoReverso.key);
+    if (doc.archivoExtra?.key) s3Keys.push(doc.archivoExtra.key);
   }
 
   // Eliminar archivos de S3 (en paralelo, sin bloquear si falla uno)

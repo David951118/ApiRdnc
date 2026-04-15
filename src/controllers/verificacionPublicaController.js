@@ -81,10 +81,16 @@ exports.verificarPreoperacional = async (req, res) => {
               branding: empresa.branding,
             }
           : null,
-        // Inspección completa por secciones (estado, observaciones, fotoUrl)
-        seccionDelantera: preop.seccionDelantera,
-        seccionMedia: preop.seccionMedia,
-        seccionTrasera: preop.seccionTrasera,
+        // Condiciones del conductor (sueño, salud, selfie, etc.)
+        seccionConductor: preop.seccionConductor || null,
+        // Inspección completa por secciones (incluye items nuevos: parabrisas, kitPrimerosAuxilios, extintor, herramienta)
+        seccionDelantera: preop.seccionDelantera || null,
+        seccionMedia: preop.seccionMedia || null,
+        seccionTrasera: preop.seccionTrasera || null,
+        // Novedades y anotaciones
+        novedades: preop.novedades || [],
+        anotaciones: preop.anotaciones || [],
+        fechaLimiteNovedades: preop.fechaLimiteNovedades || null,
         // Firma
         firmadoCheck: preop.firmadoCheck || false,
         firmaConductorUrl: preop.firmaConductorUrl || null,

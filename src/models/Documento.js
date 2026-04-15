@@ -95,6 +95,15 @@ const DocumentoSchema = new Schema(
       pesoBytes: Number,
     },
 
+    // Archivo extra / adicional (opcional, ej: anexo, constancia)
+    archivoExtra: {
+      url: { type: String },
+      key: { type: String },
+      mimeType: String,
+      nombreOriginal: String,
+      pesoBytes: Number,
+    },
+
     // Estado
     estado: {
       type: String,

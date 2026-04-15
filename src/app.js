@@ -94,6 +94,7 @@ app.get("/health", (req, res) => {
 // Routes públicas (sin autenticación)
 app.use("/api/auth", authRoutes);
 app.use("/api/verificar", require("./routes/verificacion"));
+app.use("/api/contacto", require("./routes/contacto"));
 
 // Routes protegidas (requieren autenticación)
 app.use("/api", authenticate, indexRoutes);

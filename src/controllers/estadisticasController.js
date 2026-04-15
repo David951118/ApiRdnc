@@ -156,20 +156,28 @@ exports.getEmpresaResumen = async (req, res) => {
       { "entidadesAsociadas.entidadId": { $in: vehiculosIds } },
     ];
 
-    const totalDocumentos = await Documento.countDocuments({
-      deletedAt: null,
-      $or: docOrConditions,
-    });
-    const documentosVencidos = await Documento.countDocuments({
-      deletedAt: null,
-      estado: "VENCIDO",
-      $or: docOrConditions,
-    });
-    const documentosPorVencer = await Documento.countDocuments({
-      deletedAt: null,
-      estado: "POR_VENCER",
-      $or: docOrConditions,
-    });
+    // Calcular en tiempo real por fechaVencimiento
+    const hoyDoc = new Date();
+    hoyDoc.setHours(0, 0, 0, 0);
+    const en30Dias = new Date(hoyDoc);
+    en30Dias.setDate(en30Dias.getDate() + 30);
+
+    const docBase = { deletedAt: null, $or: docOrConditions };
+
+    const [totalDocumentos, documentosVencidos, documentosPorVencer] =
+      await Promise.all([
+        Documento.countDocuments(docBase),
+        Documento.countDocuments({
+          ...docBase,
+          fechaVencimiento: { $lt: hoyDoc },
+          estado: { $nin: ["HISTORICO", "RECHAZADO"] },
+        }),
+        Documento.countDocuments({
+          ...docBase,
+          fechaVencimiento: { $gte: hoyDoc, $lte: en30Dias },
+          estado: { $nin: ["HISTORICO", "RECHAZADO"] },
+        }),
+      ]);
 
     res.json({
       success: true,
@@ -341,16 +349,40 @@ exports.getDocumentosResumen = async (req, res) => {
       ];
     }
 
-    const [total, vigentes, porVencer, vencidos] = await Promise.all([
-      Documento.countDocuments(baseQuery),
-      Documento.countDocuments({ ...baseQuery, estado: "VIGENTE" }),
-      Documento.countDocuments({ ...baseQuery, estado: "POR_VENCER" }),
-      Documento.countDocuments({ ...baseQuery, estado: "VENCIDO" }),
-    ]);
+    // Calcular en tiempo real por fechaVencimiento (no depender del campo estado
+    // que puede estar desactualizado entre ejecuciones del cron)
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    const en30Dias = new Date(hoy);
+    en30Dias.setDate(en30Dias.getDate() + 30);
+
+    const [total, vencidos, porVencer, vigentes, sinVencimiento] =
+      await Promise.all([
+        Documento.countDocuments(baseQuery),
+        Documento.countDocuments({
+          ...baseQuery,
+          fechaVencimiento: { $lt: hoy },
+          estado: { $nin: ["HISTORICO", "RECHAZADO"] },
+        }),
+        Documento.countDocuments({
+          ...baseQuery,
+          fechaVencimiento: { $gte: hoy, $lte: en30Dias },
+          estado: { $nin: ["HISTORICO", "RECHAZADO"] },
+        }),
+        Documento.countDocuments({
+          ...baseQuery,
+          fechaVencimiento: { $gt: en30Dias },
+          estado: { $nin: ["HISTORICO", "RECHAZADO"] },
+        }),
+        Documento.countDocuments({
+          ...baseQuery,
+          fechaVencimiento: null,
+        }),
+      ]);
 
     res.json({
       success: true,
-      data: { total, vigentes, porVencer, vencidos },
+      data: { total, vigentes, porVencer, vencidos, sinVencimiento },
     });
   } catch (error) {
     logger.error(`Error generando estadísticas de documentos: ${error.message}`);
