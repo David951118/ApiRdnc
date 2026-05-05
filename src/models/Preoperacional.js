@@ -6,7 +6,7 @@ const ItemRevisionSchema = new Schema(
   {
     estado: {
       type: String,
-      enum: ["BUENO", "REGULAR", "MALO"],
+      enum: ["BUENO", "REGULAR", "MALO", "NO_APLICA"],
       required: true,
     },
     observaciones: String,
@@ -127,6 +127,7 @@ const PreoperacionalSchema = new Schema(
     fecha: { type: Date, default: Date.now },
     kilometraje: Number,
     creadoPor: String, // userId de quien creó la preoperacional
+    creadoPorAdmin: { type: Boolean, default: false }, // true si fue creada por un admin en nombre del conductor
 
     // ═══ SECCIÓN CONDUCTOR (condiciones de salud y aptitud) ═══
     seccionConductor: {
@@ -135,7 +136,7 @@ const PreoperacionalSchema = new Schema(
       selfieFecha: Date, // Fecha/hora en que se tomó la selfie
       estadoSalud: {
         type: String,
-        enum: ["BUENO", "REGULAR", "MALO"],
+        enum: ["BUENO", "REGULAR", "MALO", "NO_APLICA"],
       },
       estadoSaludObservaciones: String, // Si REGULAR o MALO, explicar
       tomaMedicamentos: { type: Boolean, default: false },
@@ -144,30 +145,53 @@ const PreoperacionalSchema = new Schema(
       sustanciasDetalle: String,
     },
 
-    // ═══ SECCIÓN DELANTERA ═══
+    // ═══ SECCIÓN DELANTERA (niveles, fugas, llantas y luces frontales) ═══
     seccionDelantera: {
       luces: ItemRevisionSchema,
       direccionalesDelanteros: ItemRevisionSchema,
       limpiabrisas: ItemRevisionSchema,
       parabrisas: ItemRevisionSchema,
-      espejosRetrovisores: ItemRevisionSchema,
-      liquidos: ItemRevisionSchema,
       llantaDelanteraDerecha: ItemRevisionSchema,
       llantaDelanteraIzquierda: ItemRevisionSchema,
       bocina: ItemRevisionSchema,
       frenos: ItemRevisionSchema,
+      // Niveles y fugas (reemplazan al campo "liquidos" único)
+      nivelAceiteMotor: ItemRevisionSchema,
+      nivelLiquidoFrenos: ItemRevisionSchema,
+      nivelAguaRadiador: ItemRevisionSchema,
+      estadoBateria: ItemRevisionSchema,
+      fugasLiquidos: ItemRevisionSchema,
     },
 
-    // ═══ SECCIÓN MEDIA ═══
+    // ═══ SECCIÓN MEDIA (cabina, confort, seguridad pasiva, dirección/suspensión) ═══
     seccionMedia: {
       tablero: ItemRevisionSchema,
       timon: ItemRevisionSchema,
-      cinturones: ItemRevisionSchema,
       pedales: ItemRevisionSchema,
       frenoMano: ItemRevisionSchema,
-      bateria: ItemRevisionSchema,
       kitPrimerosAuxilios: ItemRevisionSchema,
       reflectivos: ItemRevisionSchema,
+      // Confort
+      aireAcondicionado: ItemRevisionSchema,
+      silleteria: ItemRevisionSchema,
+      nivelCombustible: ItemRevisionSchema,
+      pito: ItemRevisionSchema,
+      // Seguridad pasiva
+      cinturonesSeguridad: ItemRevisionSchema,
+      airbags: ItemRevisionSchema,
+      vidrios: ItemRevisionSchema,
+      apoyacabezas: ItemRevisionSchema,
+      // Espejos
+      espejoIzquierdo: ItemRevisionSchema,
+      espejoDerecho: ItemRevisionSchema,
+      espejoRetrovisor: ItemRevisionSchema,
+      // Dirección y suspensión
+      estadoDireccion: ItemRevisionSchema,
+      suspensionDelantera: ItemRevisionSchema,
+      suspensionTrasera: ItemRevisionSchema,
+      // Carrocería
+      calcomanias: ItemRevisionSchema,
+      puertas: ItemRevisionSchema,
     },
 
     // ═══ SECCIÓN TRASERA ═══
@@ -181,6 +205,14 @@ const PreoperacionalSchema = new Schema(
       placa: ItemRevisionSchema,
       extintor: ItemRevisionSchema,
       herramienta: ItemRevisionSchema,
+    },
+
+    // ═══ SECCIÓN ASEO ═══
+    seccionAseo: {
+      aseoInterno: ItemRevisionSchema,
+      aseoExterno: ItemRevisionSchema,
+      latas: ItemRevisionSchema,
+      pintura: ItemRevisionSchema,
     },
 
     // ═══ RESULTADO GLOBAL ═══
@@ -223,7 +255,12 @@ PreoperacionalSchema.pre("save", async function () {
     const ahora = new Date();
 
     // 1. Revisar secciones del vehículo
-    const secciones = ["seccionDelantera", "seccionMedia", "seccionTrasera"];
+    const secciones = [
+      "seccionDelantera",
+      "seccionMedia",
+      "seccionTrasera",
+      "seccionAseo",
+    ];
     for (const seccion of secciones) {
       const datos = this[seccion];
       if (!datos) continue;

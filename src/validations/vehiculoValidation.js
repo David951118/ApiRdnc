@@ -33,6 +33,14 @@ const createVehiculo = Joi.object({
   propietario: Joi.string()
     .regex(/^[0-9a-fA-F]{24}$/)
     .message("ID de propietario inválido"), // Mongo ID
+  // Conductores adicionales asignados al vehículo (Tercero IDs)
+  conductoresAsignados: Joi.array()
+    .items(
+      Joi.string()
+        .regex(/^[0-9a-fA-F]{24}$/)
+        .message("ID de conductor asignado inválido"),
+    )
+    .optional(),
   // ID de la empresa afiliadora (referencia a Empresa)
   empresaAfiliadora: Joi.string()
     .regex(/^[0-9a-fA-F]{24}$/)

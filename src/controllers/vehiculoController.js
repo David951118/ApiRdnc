@@ -1,4 +1,5 @@
 const Vehiculo = require("../models/Vehiculo");
+const Tercero = require("../models/Tercero");
 const Documento = require("../models/Documento");
 const Preoperacional = require("../models/Preoperacional");
 const ContratoFuec = require("../models/ContratoFUEC");
@@ -278,6 +279,167 @@ exports.restore = async (req, res) => {
     res.json({ success: true, message: "Vehículo restaurado", data: vehiculo });
   } catch (error) {
     logger.error(`Error restaurando vehículo: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Listar conductores asignados al vehículo (incluye propietario).
+ * GET /api/vehiculos/:id/conductores
+ */
+exports.listarConductoresAsignados = async (req, res) => {
+  try {
+    const vehiculo = await Vehiculo.findOne({
+      _id: req.params.id,
+      deletedAt: null,
+    })
+      .populate("propietario", "nombres apellidos razonSocial identificacion roles")
+      .populate(
+        "conductoresAsignados",
+        "nombres apellidos razonSocial identificacion roles estado",
+      )
+      .lean();
+
+    if (!vehiculo) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Vehículo no encontrado" });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        propietario: vehiculo.propietario || null,
+        conductoresAsignados: vehiculo.conductoresAsignados || [],
+      },
+    });
+  } catch (error) {
+    logger.error(`Error listando conductores asignados: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Asignar un conductor (Tercero) al vehículo.
+ * POST /api/vehiculos/:id/conductores
+ * Body: { terceroId: "<ObjectId>" }
+ */
+exports.asignarConductor = async (req, res) => {
+  try {
+    const { terceroId } = req.body;
+    if (!terceroId || !terceroId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "terceroId inválido" });
+    }
+
+    const vehiculo = await Vehiculo.findOne({
+      _id: req.params.id,
+      deletedAt: null,
+    });
+    if (!vehiculo) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Vehículo no encontrado" });
+    }
+
+    const tercero = await Tercero.findOne({
+      _id: terceroId,
+      deletedAt: null,
+    });
+    if (!tercero) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Tercero no encontrado" });
+    }
+
+    // Solo CONDUCTOR o PROPIETARIO pueden ser asignados
+    const rolesValidos = ["CONDUCTOR", "PROPIETARIO"];
+    const tieneRolValido = (tercero.roles || []).some((r) =>
+      rolesValidos.includes(r),
+    );
+    if (!tieneRolValido) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "El tercero debe tener rol CONDUCTOR o PROPIETARIO para ser asignado",
+      });
+    }
+
+    const yaAsignado = (vehiculo.conductoresAsignados || []).some(
+      (id) => id.toString() === terceroId.toString(),
+    );
+    if (yaAsignado) {
+      return res.status(409).json({
+        success: false,
+        message: "El tercero ya está asignado a este vehículo",
+      });
+    }
+
+    vehiculo.conductoresAsignados = vehiculo.conductoresAsignados || [];
+    vehiculo.conductoresAsignados.push(terceroId);
+    await vehiculo.save();
+
+    const populated = await Vehiculo.findById(vehiculo._id)
+      .populate(
+        "conductoresAsignados",
+        "nombres apellidos razonSocial identificacion roles",
+      )
+      .lean();
+
+    res.status(201).json({
+      success: true,
+      message: "Conductor asignado al vehículo",
+      data: {
+        vehiculo: vehiculo._id,
+        conductoresAsignados: populated.conductoresAsignados,
+      },
+    });
+  } catch (error) {
+    logger.error(`Error asignando conductor: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Desasignar un conductor (Tercero) del vehículo.
+ * DELETE /api/vehiculos/:id/conductores/:terceroId
+ */
+exports.desasignarConductor = async (req, res) => {
+  try {
+    const { id, terceroId } = req.params;
+
+    const vehiculo = await Vehiculo.findOne({ _id: id, deletedAt: null });
+    if (!vehiculo) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Vehículo no encontrado" });
+    }
+
+    const antes = (vehiculo.conductoresAsignados || []).length;
+    vehiculo.conductoresAsignados = (vehiculo.conductoresAsignados || []).filter(
+      (refId) => refId.toString() !== terceroId.toString(),
+    );
+
+    if (vehiculo.conductoresAsignados.length === antes) {
+      return res.status(404).json({
+        success: false,
+        message: "El tercero no estaba asignado a este vehículo",
+      });
+    }
+
+    await vehiculo.save();
+
+    res.json({
+      success: true,
+      message: "Conductor desasignado del vehículo",
+      data: {
+        vehiculo: vehiculo._id,
+        conductoresAsignados: vehiculo.conductoresAsignados,
+      },
+    });
+  } catch (error) {
+    logger.error(`Error desasignando conductor: ${error.message}`);
     res.status(500).json({ success: false, message: error.message });
   }
 };

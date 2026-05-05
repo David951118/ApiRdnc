@@ -114,6 +114,7 @@ app.use("/api/empresas", authenticate, require("./routes/empresas"));
 app.use("/api/contratos", authenticate, require("./routes/contratos"));
 app.use("/api/rutas", authenticate, require("./routes/rutas"));
 app.use("/api/estadisticas", authenticate, require("./routes/estadisticas"));
+app.use("/api/gps", require("./routes/gps"));
 
 // 404 Handler
 app.use((req, res) => {

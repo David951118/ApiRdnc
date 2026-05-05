@@ -35,6 +35,9 @@ const VehiculoSchema = new Schema(
 
     // Propiedad
     propietario: { type: Schema.Types.ObjectId, ref: "Tercero" },
+    // Conductores adicionales asignados al vehículo (más allá del propietario).
+    // El propietario y estos conductores pueden crear preoperacionales y ver el vehículo.
+    conductoresAsignados: [{ type: Schema.Types.ObjectId, ref: "Tercero" }],
     // Empresa a la que está afiliado el vehículo
     // Ahora se referencia por ID de Empresa para permitir asociación fuerte
     empresaAfiliadora: { type: Schema.Types.ObjectId, ref: "Empresa" },

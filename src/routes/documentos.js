@@ -42,27 +42,27 @@ router.put(
   documentoController.update,
 );
 
-// Soft Delete (Solo ADMIN)
+// Soft Delete (ADMIN o CLIENTE_ADMIN dentro de su empresa)
 router.delete(
   "/:id",
   authenticate,
-  checkRole(["ADMIN"]),
+  checkRole(["ADMIN", "CLIENTE_ADMIN"]),
   documentoController.softDelete,
 );
 
-// Hard Delete (Solo ADMIN)
+// Hard Delete (ADMIN o CLIENTE_ADMIN dentro de su empresa)
 router.delete(
   "/:id/hard",
   authenticate,
-  checkRole(["ADMIN"]),
+  checkRole(["ADMIN", "CLIENTE_ADMIN"]),
   documentoController.hardDelete,
 );
 
-// Restaurar documento eliminado (Solo ADMIN)
+// Restaurar documento eliminado (ADMIN o CLIENTE_ADMIN dentro de su empresa)
 router.post(
   "/:id/restore",
   authenticate,
-  checkRole(["ADMIN"]),
+  checkRole(["ADMIN", "CLIENTE_ADMIN"]),
   documentoController.restore,
 );
 

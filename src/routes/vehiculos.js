@@ -68,4 +68,28 @@ router.delete(
   vehiculoController.hardDelete,
 );
 
+// ═══ ASIGNACIÓN DE CONDUCTORES/PROPIETARIOS ═══
+// Listar conductores asignados (cualquiera autenticado con acceso)
+router.get(
+  "/:id/conductores",
+  authenticate,
+  vehiculoController.listarConductoresAsignados,
+);
+
+// Asignar conductor/propietario (ADMIN o CLIENTE_ADMIN)
+router.post(
+  "/:id/conductores",
+  authenticate,
+  checkRole(["ADMIN", "CLIENTE_ADMIN"]),
+  vehiculoController.asignarConductor,
+);
+
+// Desasignar conductor/propietario (ADMIN o CLIENTE_ADMIN)
+router.delete(
+  "/:id/conductores/:terceroId",
+  authenticate,
+  checkRole(["ADMIN", "CLIENTE_ADMIN"]),
+  vehiculoController.desasignarConductor,
+);
+
 module.exports = router;

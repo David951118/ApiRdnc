@@ -3,10 +3,10 @@ const Joi = require("joi");
 // Ítem de revisión (común a todas las secciones del vehículo)
 const itemRevision = Joi.object({
   estado: Joi.string()
-    .valid("BUENO", "REGULAR", "MALO")
+    .valid("BUENO", "REGULAR", "MALO", "NO_APLICA")
     .required()
     .messages({
-      "any.only": "estado debe ser BUENO, REGULAR o MALO",
+      "any.only": "estado debe ser BUENO, REGULAR, MALO o NO_APLICA",
       "any.required": "El estado del ítem es obligatorio",
     }),
   observaciones: Joi.string().allow("", null),
@@ -18,7 +18,9 @@ const seccionConductor = Joi.object({
   horasSueno: Joi.number().min(0).max(24).allow(null),
   selfieUrl: Joi.string().uri().allow("", null),
   selfieFecha: Joi.date().allow(null),
-  estadoSalud: Joi.string().valid("BUENO", "REGULAR", "MALO").allow(null),
+  estadoSalud: Joi.string()
+    .valid("BUENO", "REGULAR", "MALO", "NO_APLICA")
+    .allow(null),
   estadoSaludObservaciones: Joi.string().allow("", null),
   tomaMedicamentos: Joi.boolean().default(false),
   medicamentosDetalle: Joi.string().allow("", null),
@@ -26,30 +28,47 @@ const seccionConductor = Joi.object({
   sustanciasDetalle: Joi.string().allow("", null),
 }).optional();
 
-// Sección delantera
+// Sección delantera (niveles, fugas, llantas y luces frontales)
 const seccionDelantera = Joi.object({
   luces: itemRevision,
   direccionalesDelanteros: itemRevision,
   limpiabrisas: itemRevision,
   parabrisas: itemRevision,
-  espejosRetrovisores: itemRevision,
-  liquidos: itemRevision,
   llantaDelanteraDerecha: itemRevision,
   llantaDelanteraIzquierda: itemRevision,
   bocina: itemRevision,
   frenos: itemRevision,
+  nivelAceiteMotor: itemRevision,
+  nivelLiquidoFrenos: itemRevision,
+  nivelAguaRadiador: itemRevision,
+  estadoBateria: itemRevision,
+  fugasLiquidos: itemRevision,
 }).optional();
 
-// Sección media
+// Sección media (cabina, confort, seguridad pasiva, dirección/suspensión, carrocería)
 const seccionMedia = Joi.object({
   tablero: itemRevision,
   timon: itemRevision,
-  cinturones: itemRevision,
   pedales: itemRevision,
   frenoMano: itemRevision,
-  bateria: itemRevision,
   kitPrimerosAuxilios: itemRevision,
   reflectivos: itemRevision,
+  aireAcondicionado: itemRevision,
+  silleteria: itemRevision,
+  nivelCombustible: itemRevision,
+  pito: itemRevision,
+  cinturonesSeguridad: itemRevision,
+  airbags: itemRevision,
+  vidrios: itemRevision,
+  apoyacabezas: itemRevision,
+  espejoIzquierdo: itemRevision,
+  espejoDerecho: itemRevision,
+  espejoRetrovisor: itemRevision,
+  estadoDireccion: itemRevision,
+  suspensionDelantera: itemRevision,
+  suspensionTrasera: itemRevision,
+  calcomanias: itemRevision,
+  puertas: itemRevision,
 }).optional();
 
 // Sección trasera
@@ -63,6 +82,14 @@ const seccionTrasera = Joi.object({
   placa: itemRevision,
   extintor: itemRevision,
   herramienta: itemRevision,
+}).optional();
+
+// Sección aseo
+const seccionAseo = Joi.object({
+  aseoInterno: itemRevision,
+  aseoExterno: itemRevision,
+  latas: itemRevision,
+  pintura: itemRevision,
 }).optional();
 
 const createPreoperacional = Joi.object({
@@ -89,6 +116,7 @@ const createPreoperacional = Joi.object({
   seccionDelantera,
   seccionMedia,
   seccionTrasera,
+  seccionAseo,
 
   // estadoGeneral se calcula automáticamente en el pre-save
   estadoGeneral: Joi.string()
@@ -97,6 +125,16 @@ const createPreoperacional = Joi.object({
 
   firmadoCheck: Joi.boolean().optional(),
   firmaConductorUrl: Joi.string().uri().allow("", null).optional(),
+
+  // Creación delegada por un administrador de flota en nombre del conductor
+  creadoPorAdmin: Joi.boolean().optional(),
+  creadoPorUserId: Joi.string()
+    .regex(/^[0-9a-fA-F]{24}$/)
+    .optional()
+    .allow("", null)
+    .messages({
+      "string.pattern.base": "creadoPorUserId inválido (ObjectId 24 caracteres)",
+    }),
 });
 
 const updatePreoperacional = createPreoperacional.fork(

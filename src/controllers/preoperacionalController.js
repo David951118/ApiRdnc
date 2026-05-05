@@ -10,7 +10,8 @@ const logger = require("../config/logger");
  * Scope de preoperacionales según rol:
  * - ADMIN/SUPER: todo
  * - CLIENTE_ADMIN: vehículos de su empresa
- * - CLIENTE: solo sus vehiculosPermitidos
+ * - CLIENTE/CONDUCTOR/PROPIETARIO: vehículos asignados (propietario,
+ *   conductoresAsignados) + legacy vehiculosPermitidos por placa.
  */
 async function getPreoperacionalScope(req) {
   const rolesNormalized = (req.user?.roles || []).map((r) =>
@@ -35,17 +36,42 @@ async function getPreoperacionalScope(req) {
     return { vehiculo: { $in: vehiculoIds } };
   }
 
-  // CLIENTE: solo vehículos asignados (por placa)
+  // CLIENTE/CONDUCTOR/PROPIETARIO: Vehículos donde el tercero del usuario
+  // sea propietario o esté en conductoresAsignados, más el legacy de Cellvi.
+  const terceroId = req.user?.terceroId;
   const permitidos = req.session?.vehiculosPermitidos || [];
-  if (!permitidos.length) {
+
+  const idsSet = new Set();
+
+  if (terceroId) {
+    const asignados = await Vehiculo.find({
+      deletedAt: null,
+      $or: [
+        { propietario: terceroId },
+        { conductoresAsignados: terceroId },
+      ],
+    })
+      .select("_id")
+      .lean();
+    asignados.forEach((v) => idsSet.add(v._id.toString()));
+  }
+
+  if (permitidos.length) {
+    const placas = permitidos.map((v) => v.placa);
+    const vehiculos = await Vehiculo.find({ placa: { $in: placas } })
+      .select("_id")
+      .lean();
+    vehiculos.forEach((v) => idsSet.add(v._id.toString()));
+  }
+
+  if (idsSet.size === 0) {
     return { vehiculo: null };
   }
-  const placas = permitidos.map((v) => v.placa);
-  const vehiculos = await Vehiculo.find({ placa: { $in: placas } })
-    .select("_id")
-    .lean();
-  const vehiculoIds = vehiculos.map((v) => v._id);
-  return { vehiculo: { $in: vehiculoIds } };
+
+  const objectIds = Array.from(idsSet).map(
+    (id) => new mongoose.Types.ObjectId(id),
+  );
+  return { vehiculo: { $in: objectIds } };
 }
 
 /**
@@ -141,6 +167,7 @@ exports.getQR = async (req, res) => {
         seccionDelantera: preop.seccionDelantera,
         seccionMedia: preop.seccionMedia,
         seccionTrasera: preop.seccionTrasera,
+        seccionAseo: preop.seccionAseo,
         firmadoCheck: preop.firmadoCheck || false,
         firmaConductorUrl: preop.firmaConductorUrl || null,
         creadoEn: preop.createdAt,
@@ -206,7 +233,11 @@ exports.habilitarExtra = async (req, res) => {
  */
 exports.create = async (req, res) => {
   try {
-    const { vehiculo: vehiculoId, conductor: conductorId } = req.body;
+    const {
+      vehiculo: vehiculoId,
+      conductor: conductorId,
+      creadoPorAdmin: flagCreadoPorAdmin,
+    } = req.body;
 
     const vehiculo = await Vehiculo.findById(vehiculoId);
     if (!vehiculo) {
@@ -229,6 +260,23 @@ exports.create = async (req, res) => {
       return res.status(403).json({
         success: false,
         message: "No tiene permisos para crear preoperacional de este vehículo",
+      });
+    }
+
+    // Si el frontend marca creadoPorAdmin, verificar que el usuario autenticado
+    // tenga rol de administrador. No confiamos en creadoPorUserId del body.
+    const rolesNormalized = (req.user?.roles || []).map((r) =>
+      r.replace("ROLE_", "").toUpperCase(),
+    );
+    const isAdmin =
+      rolesNormalized.includes("ADMIN") ||
+      rolesNormalized.includes("CLIENTE_ADMIN");
+
+    if (flagCreadoPorAdmin && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Solo un administrador puede crear preoperacionales en modo admin",
       });
     }
 
@@ -271,8 +319,13 @@ exports.create = async (req, res) => {
       await vehiculo.save();
     }
 
-    const check = new Preoperacional(req.body);
+    // Excluir campos de control que no deben llegar al modelo directamente
+    const { creadoPorUserId: _cpuid, creadoPorAdmin: _cpa, ...bodyLimpio } =
+      req.body;
+
+    const check = new Preoperacional(bodyLimpio);
     check.creadoPor = req.user?.userId || null;
+    check.creadoPorAdmin = Boolean(flagCreadoPorAdmin && isAdmin);
     await check.save();
 
     const populated = await Preoperacional.findById(check._id)
@@ -849,11 +902,12 @@ exports.validarHojaDeVida = async (req, res) => {
     }
 
     // 5. Consultar documentos del vehículo y conductor en paralelo
+    // Nota: TARJETA_OPERACION ya no es requerida para crear preoperacional.
     const [docsVehiculo, docsConductor] = await Promise.all([
       Documento.find({
         entidadId: vehiculoId,
         entidadModelo: "Vehiculo",
-        tipoDocumento: { $in: ["SOAT", "TECNOMECANICA", "TARJETA_OPERACION"] },
+        tipoDocumento: { $in: ["SOAT", "TECNOMECANICA"] },
         deletedAt: null,
       })
         .sort({ fechaVencimiento: -1 })
@@ -869,7 +923,7 @@ exports.validarHojaDeVida = async (req, res) => {
     ]);
 
     // 6. Validar documentos requeridos del vehículo
-    const docsRequeridosVehiculo = ["SOAT", "TECNOMECANICA", "TARJETA_OPERACION"];
+    const docsRequeridosVehiculo = ["SOAT", "TECNOMECANICA"];
     for (const tipo of docsRequeridosVehiculo) {
       const docs = docsVehiculo.filter((d) => d.tipoDocumento === tipo);
       validarDocumento(tipo, docs, "vehículo", errores, alertas);
@@ -1643,6 +1697,7 @@ exports.getHistorial = async (req, res) => {
           vehiculo: preop.vehiculo,
           conductor: preop.conductor,
           creadoPor: preop.creadoPor,
+          creadoPorAdmin: preop.creadoPorAdmin || false,
           createdAt: preop.createdAt,
           fechaLimiteNovedades: preop.fechaLimiteNovedades,
         },

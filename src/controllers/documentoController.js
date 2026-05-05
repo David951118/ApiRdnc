@@ -554,20 +554,11 @@ exports.softDelete = async (req, res) => {
 };
 
 /**
- * Hard Delete (eliminación definitiva) - Solo ADMIN
+ * Hard Delete (eliminación definitiva) - ADMIN o CLIENTE_ADMIN dentro de su empresa.
+ * Borra siempre los archivos de S3 para no acumular basura.
  */
 exports.hardDelete = async (req, res) => {
   try {
-    const { isAdmin } = getRoles(req);
-
-    if (!isAdmin) {
-      return res.status(403).json({
-        success: false,
-        message:
-          "Solo administradores pueden eliminar documentos permanentemente",
-      });
-    }
-
     const { id } = req.params;
     const documento = await Documento.findById(id);
 
@@ -578,15 +569,45 @@ exports.hardDelete = async (req, res) => {
       });
     }
 
-    // Eliminar archivos de S3
+    // Verificar scope: CLIENTE_ADMIN solo puede borrar docs de su empresa.
+    const scope = await getDocumentScope(req);
+    if (Object.keys(scope).length > 0) {
+      const tieneAcceso = await Documento.findOne({ _id: id, ...scope });
+      if (!tieneAcceso || scope._id === null) {
+        return res.status(403).json({
+          success: false,
+          message: "No tiene permisos para eliminar este documento",
+        });
+      }
+    }
+
+    // Recolectar keys de S3 a eliminar
     const keysToDelete = [];
     if (documento.archivo?.key) keysToDelete.push(documento.archivo.key);
-    if (documento.archivoReverso?.key) keysToDelete.push(documento.archivoReverso.key);
-    if (documento.archivoExtra?.key) keysToDelete.push(documento.archivoExtra.key);
+    if (documento.archivoReverso?.key)
+      keysToDelete.push(documento.archivoReverso.key);
+    if (documento.archivoExtra?.key)
+      keysToDelete.push(documento.archivoExtra.key);
 
+    // allSettled: si algún borrado de S3 falla, lo registramos pero no bloqueamos
+    // la eliminación del documento en MongoDB.
     if (keysToDelete.length > 0) {
-      await Promise.all(keysToDelete.map((key) => s3Service.deleteObject(key)));
-      logger.info(`S3: eliminados ${keysToDelete.length} archivo(s) del documento ${id}`);
+      const resultados = await Promise.allSettled(
+        keysToDelete.map((key) => s3Service.deleteObject(key)),
+      );
+      const exitosos = resultados.filter((r) => r.status === "fulfilled").length;
+      const fallidos = resultados
+        .map((r, i) => ({ r, key: keysToDelete[i] }))
+        .filter(({ r }) => r.status === "rejected");
+
+      logger.info(
+        `S3: ${exitosos}/${keysToDelete.length} archivo(s) eliminados del documento ${id}`,
+      );
+      for (const { r, key } of fallidos) {
+        logger.warn(
+          `S3: no se pudo eliminar ${key} del documento ${id}: ${r.reason?.message || r.reason}`,
+        );
+      }
     }
 
     await documento.deleteOne();
@@ -594,6 +615,10 @@ exports.hardDelete = async (req, res) => {
     res.json({
       success: true,
       message: "Documento eliminado permanentemente",
+      data: {
+        id,
+        archivosS3Eliminados: keysToDelete.length,
+      },
     });
   } catch (error) {
     logger.error(`Error eliminando documento (hard): ${error.message}`);
