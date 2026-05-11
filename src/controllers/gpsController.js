@@ -750,15 +750,18 @@ exports.eliminarEquipo = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Equipo no encontrado" });
 
-    if (["INSTALADO", "EN_TRANSITO"].includes(equipo.estado)) {
-      return res.status(409).json({
-        success: false,
-        message: `No se puede eliminar un equipo en estado ${equipo.estado}`,
-      });
+    // Soft delete es reversible: permitimos en cualquier estado.
+    // Si está INSTALADO o EN_TRANSITO, lo limpiamos para que no quede asignado.
+    if (["INSTALADO", "EN_TRANSITO", "EN_POSESION_TECNICO"].includes(equipo.estado)) {
+      equipo.tecnico = null;
+      equipo.vehiculoInstalado = null;
     }
 
     await equipo.softDelete(req.user?.userId);
-    res.json({ success: true, message: "Equipo eliminado" });
+    res.json({
+      success: true,
+      message: `Equipo eliminado (soft). Estado al borrar: ${equipo.estado}. Use POST /equipos/${equipo._id}/restore para deshacer.`,
+    });
   } catch (error) {
     logger.error(`Error eliminando equipo GPS: ${error.message}`);
     res.status(500).json({ success: false, message: error.message });
@@ -2250,11 +2253,13 @@ exports.listarActividades = async (req, res) => {
       placa,
       desde,
       hasta,
+      includeDeleted = false,
       page = 1,
       limit = 50,
     } = req.query;
 
-    const query = { deletedAt: null };
+    const query = {};
+    if (!includeDeleted || includeDeleted === "false") query.deletedAt = null;
     if (tipoActividad) query.tipoActividad = tipoActividad;
     if (tecnico) query.tecnico = tecnico;
     if (ciudad) query.ciudad = ciudad;
@@ -3160,3 +3165,244 @@ exports.reporteGeneral = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// ════════════════════════════════════════════════════════════════
+// RESTORE & HARD DELETE
+// ════════════════════════════════════════════════════════════════
+
+/**
+ * Helper: restaurar (deshacer soft delete) genérico.
+ */
+async function restoreDoc(Model, id) {
+  const doc = await Model.findById(id);
+  if (!doc) return { error: { status: 404, message: "No encontrado" } };
+  if (!doc.deletedAt)
+    return { error: { status: 400, message: "El documento no está eliminado" } };
+  await doc.restore();
+  return { doc };
+}
+
+exports.restoreMarca = async (req, res) => {
+  const { error, doc } = await restoreDoc(MarcaGPS, req.params.id);
+  if (error) return res.status(error.status).json({ success: false, message: error.message });
+  res.json({ success: true, message: "Marca restaurada", data: doc });
+};
+
+exports.restoreModelo = async (req, res) => {
+  const { error, doc } = await restoreDoc(ModeloGPS, req.params.id);
+  if (error) return res.status(error.status).json({ success: false, message: error.message });
+  res.json({ success: true, message: "Modelo restaurado", data: doc });
+};
+
+exports.restoreCiudad = async (req, res) => {
+  const { error, doc } = await restoreDoc(CiudadGPS, req.params.id);
+  if (error) return res.status(error.status).json({ success: false, message: error.message });
+  res.json({ success: true, message: "Ciudad restaurada", data: doc });
+};
+
+exports.restoreTecnico = async (req, res) => {
+  const { error, doc } = await restoreDoc(TecnicoGPS, req.params.id);
+  if (error) return res.status(error.status).json({ success: false, message: error.message });
+  res.json({ success: true, message: "Técnico restaurado", data: doc });
+};
+
+exports.restoreEquipo = async (req, res) => {
+  const { error, doc } = await restoreDoc(EquipoGPS, req.params.id);
+  if (error) return res.status(error.status).json({ success: false, message: error.message });
+  res.json({ success: true, message: "Equipo restaurado", data: doc });
+};
+
+exports.restoreActividad = async (req, res) => {
+  // ActividadGPS no tiene método restore en el schema; lo hacemos aquí.
+  const doc = await ActividadGPS.findById(req.params.id);
+  if (!doc)
+    return res.status(404).json({ success: false, message: "No encontrado" });
+  if (!doc.deletedAt)
+    return res
+      .status(400)
+      .json({ success: false, message: "El documento no está eliminado" });
+  doc.deletedAt = null;
+  doc.deletedBy = null;
+  await doc.save();
+  res.json({ success: true, message: "Actividad restaurada", data: doc });
+};
+
+// ─── HARD DELETE ─────────────────────────────────────────────────
+// Eliminación física definitiva. Cada uno valida integridad referencial.
+
+exports.hardDeleteMarca = async (req, res) => {
+  try {
+    const marca = await MarcaGPS.findById(req.params.id);
+    if (!marca)
+      return res.status(404).json({ success: false, message: "Marca no encontrada" });
+
+    const modelos = await ModeloGPS.countDocuments({ marca: marca._id });
+    const equipos = await EquipoGPS.countDocuments({ marca: marca._id });
+    if (modelos > 0 || equipos > 0) {
+      return res.status(409).json({
+        success: false,
+        message: `No se puede eliminar permanentemente: ${modelos} modelo(s) y ${equipos} equipo(s) referencian esta marca`,
+      });
+    }
+    await marca.deleteOne();
+    res.json({ success: true, message: "Marca eliminada permanentemente" });
+  } catch (error) {
+    logger.error(`Error hard delete marca: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.hardDeleteModelo = async (req, res) => {
+  try {
+    const modelo = await ModeloGPS.findById(req.params.id);
+    if (!modelo)
+      return res.status(404).json({ success: false, message: "Modelo no encontrado" });
+
+    const equipos = await EquipoGPS.countDocuments({ modelo: modelo._id });
+    if (equipos > 0) {
+      return res.status(409).json({
+        success: false,
+        message: `No se puede eliminar permanentemente: ${equipos} equipo(s) referencian este modelo`,
+      });
+    }
+    await modelo.deleteOne();
+    res.json({ success: true, message: "Modelo eliminado permanentemente" });
+  } catch (error) {
+    logger.error(`Error hard delete modelo: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.hardDeleteCiudad = async (req, res) => {
+  try {
+    const ciudad = await CiudadGPS.findById(req.params.id);
+    if (!ciudad)
+      return res.status(404).json({ success: false, message: "Ciudad no encontrada" });
+
+    if (ciudad.esCentral) {
+      return res.status(409).json({
+        success: false,
+        message: "No se puede eliminar permanentemente la ciudad central",
+      });
+    }
+    const [equipos, tecnicos, actividades] = await Promise.all([
+      EquipoGPS.countDocuments({ ciudad: ciudad._id }),
+      TecnicoGPS.countDocuments({ ciudad: ciudad._id }),
+      ActividadGPS.countDocuments({ ciudad: ciudad._id }),
+    ]);
+    if (equipos > 0 || tecnicos > 0 || actividades > 0) {
+      return res.status(409).json({
+        success: false,
+        message: `No se puede eliminar permanentemente: ${equipos} equipo(s), ${tecnicos} técnico(s), ${actividades} actividad(es) la referencian`,
+      });
+    }
+    await ciudad.deleteOne();
+    res.json({ success: true, message: "Ciudad eliminada permanentemente" });
+  } catch (error) {
+    logger.error(`Error hard delete ciudad: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.hardDeleteTecnico = async (req, res) => {
+  try {
+    const tecnico = await TecnicoGPS.findById(req.params.id);
+    if (!tecnico)
+      return res.status(404).json({ success: false, message: "Técnico no encontrado" });
+
+    const [equipos, actividades] = await Promise.all([
+      EquipoGPS.countDocuments({ tecnico: tecnico._id }),
+      ActividadGPS.countDocuments({ tecnico: tecnico._id }),
+    ]);
+    if (equipos > 0 || actividades > 0) {
+      return res.status(409).json({
+        success: false,
+        message: `No se puede eliminar permanentemente: ${equipos} equipo(s) y ${actividades} actividad(es) referencian este técnico`,
+      });
+    }
+    await tecnico.deleteOne();
+    res.json({ success: true, message: "Técnico eliminado permanentemente" });
+  } catch (error) {
+    logger.error(`Error hard delete técnico: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Hard delete equipo: solo permitido en estados terminales o si ya está soft-deleted.
+ * Si tiene actividades vinculadas, las desvincula (deja la actividad pero pone null
+ * en equipoInstalado/equipoRetirado) — la actividad como evento histórico se preserva.
+ */
+exports.hardDeleteEquipo = async (req, res) => {
+  try {
+    const equipo = await EquipoGPS.findById(req.params.id);
+    if (!equipo)
+      return res.status(404).json({ success: false, message: "Equipo no encontrado" });
+
+    const estadosBloqueados = [
+      "INSTALADO",
+      "EN_TRANSITO",
+      "EN_POSESION_TECNICO",
+      "EN_GARANTIA",
+    ];
+    if (!equipo.deletedAt && estadosBloqueados.includes(equipo.estado)) {
+      return res.status(409).json({
+        success: false,
+        message: `No se puede eliminar permanentemente un equipo en estado ${equipo.estado}. Hágale soft delete primero (DELETE /equipos/:id) o llévelo a un estado terminal.`,
+      });
+    }
+
+    // Desvincular el equipo del registro de actividades (dos updates simples
+    // en vez de una aggregation pipeline). Esto preserva el histórico de
+    // actividades pero deja la referencia al equipo en null.
+    let desvinculadas = 0;
+    try {
+      const r1 = await ActividadGPS.updateMany(
+        { equipoInstalado: equipo._id },
+        { $set: { equipoInstalado: null } },
+      );
+      const r2 = await ActividadGPS.updateMany(
+        { equipoRetirado: equipo._id },
+        { $set: { equipoRetirado: null } },
+      );
+      desvinculadas =
+        (r1.modifiedCount || 0) + (r2.modifiedCount || 0);
+    } catch (e) {
+      logger.warn(
+        `No se pudieron desvincular actividades del equipo ${equipo._id}: ${e.message}`,
+      );
+    }
+
+    await equipo.deleteOne();
+
+    res.json({
+      success: true,
+      message: "Equipo eliminado permanentemente",
+      data: { actividadesDesvinculadas: desvinculadas },
+    });
+  } catch (error) {
+    logger.error(
+      `Error hard delete equipo ${req.params.id}: ${error.message}`,
+      { stack: error.stack },
+    );
+    res.status(500).json({
+      success: false,
+      message: error.message,
+      detalle: error.name,
+    });
+  }
+};
+
+exports.hardDeleteActividad = async (req, res) => {
+  try {
+    const actividad = await ActividadGPS.findById(req.params.id);
+    if (!actividad)
+      return res.status(404).json({ success: false, message: "Actividad no encontrada" });
+    await actividad.deleteOne();
+    res.json({ success: true, message: "Actividad eliminada permanentemente" });
+  } catch (error) {
+    logger.error(`Error hard delete actividad: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+

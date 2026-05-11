@@ -15,6 +15,8 @@ router.get("/marcas", ctrl.listarMarcas);
 router.get("/marcas/:id", ctrl.obtenerMarca);
 router.put("/marcas/:id", validate(v.updateMarca), ctrl.actualizarMarca);
 router.delete("/marcas/:id", ctrl.eliminarMarca);
+router.post("/marcas/:id/restore", ctrl.restoreMarca);
+router.delete("/marcas/:id/hard", ctrl.hardDeleteMarca);
 
 // ─── Modelos ───
 router.post("/modelos", validate(v.createModelo), ctrl.crearModelo);
@@ -22,6 +24,8 @@ router.get("/modelos", ctrl.listarModelos);
 router.get("/modelos/:id", ctrl.obtenerModelo);
 router.put("/modelos/:id", validate(v.updateModelo), ctrl.actualizarModelo);
 router.delete("/modelos/:id", ctrl.eliminarModelo);
+router.post("/modelos/:id/restore", ctrl.restoreModelo);
+router.delete("/modelos/:id/hard", ctrl.hardDeleteModelo);
 
 // ─── Ciudades ───
 router.post("/ciudades", validate(v.createCiudad), ctrl.crearCiudad);
@@ -29,6 +33,8 @@ router.get("/ciudades", ctrl.listarCiudades);
 router.get("/ciudades/:id", ctrl.obtenerCiudad);
 router.put("/ciudades/:id", validate(v.updateCiudad), ctrl.actualizarCiudad);
 router.delete("/ciudades/:id", ctrl.eliminarCiudad);
+router.post("/ciudades/:id/restore", ctrl.restoreCiudad);
+router.delete("/ciudades/:id/hard", ctrl.hardDeleteCiudad);
 
 // ─── Técnicos ───
 router.post("/tecnicos", validate(v.createTecnico), ctrl.crearTecnico);
@@ -37,6 +43,8 @@ router.get("/tecnicos/:id/equipos", ctrl.equiposPorTecnico);
 router.get("/tecnicos/:id", ctrl.obtenerTecnico);
 router.put("/tecnicos/:id", validate(v.updateTecnico), ctrl.actualizarTecnico);
 router.delete("/tecnicos/:id", ctrl.eliminarTecnico);
+router.post("/tecnicos/:id/restore", ctrl.restoreTecnico);
+router.delete("/tecnicos/:id/hard", ctrl.hardDeleteTecnico);
 
 // ─── Equipos GPS ───
 router.post("/equipos", validate(v.createEquipo), ctrl.crearEquipo);
@@ -46,6 +54,8 @@ router.get("/equipos/buscar", ctrl.buscarEquipo);
 router.get("/equipos/:id", ctrl.obtenerEquipo);
 router.put("/equipos/:id", validate(v.updateEquipo), ctrl.actualizarEquipo);
 router.delete("/equipos/:id", ctrl.eliminarEquipo);
+router.post("/equipos/:id/restore", ctrl.restoreEquipo);
+router.delete("/equipos/:id/hard", ctrl.hardDeleteEquipo);
 
 // Flujo
 router.post(
@@ -101,6 +111,8 @@ router.post("/actividades", validate(v.crearActividad), ctrl.crearActividad);
 router.get("/actividades", ctrl.listarActividades);
 router.get("/actividades/:id", ctrl.obtenerActividad);
 router.delete("/actividades/:id", ctrl.eliminarActividad);
+router.post("/actividades/:id/restore", ctrl.restoreActividad);
+router.delete("/actividades/:id/hard", ctrl.hardDeleteActividad);
 
 // ─── Reportes y dashboard ───
 router.get("/reportes/movimientos", ctrl.reporteMovimientos);
