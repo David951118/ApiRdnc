@@ -685,12 +685,61 @@ exports.crearEquipo = async (req, res) => {
     }
 
     const condicion = req.body.condicion || "NUEVO";
-    const equipo = await EquipoGPS.create({
+    const instalarDirecto = req.body.estado === "INSTALADO";
+
+    const doc = {
       ...req.body,
       ciudad: ciudadFinal,
       condicion,
       estado: "DISPONIBLE",
-      historial: [
+    };
+
+    if (instalarDirecto) {
+      // Registro directo en producción: el equipo nunca pasó por inventario.
+      // Resolver vehículo por placa (si está en la flota).
+      const placa = (req.body.placaInstalada || "").toUpperCase();
+      let vehiculoRef = null;
+      if (placa) {
+        const veh = await Vehiculo.findOne({ placa, deletedAt: null })
+          .select("_id")
+          .lean();
+        if (veh) vehiculoRef = veh._id;
+      }
+      // Propiedad: COMODATO auto-completa el propietario.
+      const tipoPropiedad = req.body.tipoPropiedad || "COMODATO";
+      let propietarioNombre = req.body.propietarioNombre;
+      if (tipoPropiedad === "COMODATO")
+        propietarioNombre = propietarioNombre || "ASEGURAR LTDA";
+
+      const fechaInstalacion = req.body.fechaInstalacion
+        ? new Date(req.body.fechaInstalacion)
+        : new Date();
+
+      Object.assign(doc, {
+        estado: "INSTALADO",
+        placaInstalada: placa || null,
+        vehiculoInstalado: vehiculoRef,
+        lineaSim: req.body.lineaSim || null,
+        numeroSim: req.body.numeroSim || null,
+        tipoPropiedad,
+        propietarioNombre,
+        fechaInstalacion,
+        yaUsado: true,
+        historial: [
+          {
+            accion: "INSTALADO",
+            estadoNuevo: "INSTALADO",
+            ciudadDestino: ciudadFinal,
+            usuario: req.user?.userId || null,
+            fecha: fechaInstalacion,
+            observaciones:
+              req.body.observaciones ||
+              "Equipo registrado directamente en producción (sin pasar por inventario)",
+          },
+        ],
+      });
+    } else {
+      doc.historial = [
         {
           accion: condicion === "SEGUNDA" ? "RECIBIDO_SEGUNDA" : "CREADO",
           estadoNuevo: "DISPONIBLE",
@@ -702,8 +751,10 @@ exports.crearEquipo = async (req, res) => {
               ? "Equipo de segunda recibido en inventario"
               : "Equipo nuevo recibido en inventario",
         },
-      ],
-    });
+      ];
+    }
+
+    const equipo = await EquipoGPS.create(doc);
 
     res.status(201).json({ success: true, data: equipo });
   } catch (error) {

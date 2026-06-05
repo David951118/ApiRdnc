@@ -68,6 +68,37 @@ const createEquipo = Joi.object({
   condicion: Joi.string().valid("NUEVO", "SEGUNDA").optional(),
   // Opcional: si no se manda, se ubica en la central (Pasto).
   ciudad: objectId.optional(),
+
+  // ─── Registro directo en producción (sin pasar por inventario) ───
+  // Si estado=INSTALADO el equipo se crea ya instalado en un vehículo.
+  estado: Joi.string().valid("DISPONIBLE", "INSTALADO").optional(),
+  placaInstalada: Joi.string()
+    .trim()
+    .uppercase()
+    .min(3)
+    .max(20)
+    .when("estado", {
+      is: "INSTALADO",
+      then: Joi.required().messages({
+        "any.required":
+          "placaInstalada es obligatoria para registrar el equipo como INSTALADO",
+      }),
+      otherwise: Joi.optional().allow("", null),
+    }),
+  lineaSim: Joi.string().trim().allow("", null),
+  numeroSim: Joi.string().trim().allow("", null),
+  tipoPropiedad: Joi.string().valid("PROPIO", "COMODATO").optional(),
+  propietarioNombre: Joi.string()
+    .trim()
+    .when("tipoPropiedad", {
+      is: "PROPIO",
+      then: Joi.required().messages({
+        "any.required":
+          "propietarioNombre es obligatorio cuando tipoPropiedad=PROPIO",
+      }),
+      otherwise: Joi.optional().allow("", null),
+    }),
+  fechaInstalacion: Joi.date().optional(),
 });
 const updateEquipo = Joi.object({
   marca: objectId.optional(),
