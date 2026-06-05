@@ -34,7 +34,32 @@ exports.listarMarcas = async (req, res) => {
     if (search) query.nombre = new RegExp(search, "i");
 
     const marcas = await MarcaGPS.find(query).sort({ nombre: 1 }).lean();
-    res.json({ success: true, data: marcas });
+
+    // Conteos de modelos y equipos por marca (solo no eliminados).
+    const ids = marcas.map((m) => m._id);
+    const [modelosAgg, equiposAgg] = await Promise.all([
+      ModeloGPS.aggregate([
+        { $match: { marca: { $in: ids }, deletedAt: null } },
+        { $group: { _id: "$marca", total: { $sum: 1 } } },
+      ]),
+      EquipoGPS.aggregate([
+        { $match: { marca: { $in: ids }, deletedAt: null } },
+        { $group: { _id: "$marca", total: { $sum: 1 } } },
+      ]),
+    ]);
+    const modelosPorMarca = Object.fromEntries(
+      modelosAgg.map((x) => [x._id.toString(), x.total]),
+    );
+    const equiposPorMarca = Object.fromEntries(
+      equiposAgg.map((x) => [x._id.toString(), x.total]),
+    );
+    const data = marcas.map((m) => ({
+      ...m,
+      totalModelos: modelosPorMarca[m._id.toString()] || 0,
+      totalEquipos: equiposPorMarca[m._id.toString()] || 0,
+    }));
+
+    res.json({ success: true, data });
   } catch (error) {
     logger.error(`Error listando marcas GPS: ${error.message}`);
     res.status(500).json({ success: false, message: error.message });
@@ -562,6 +587,69 @@ async function getCiudadCentral() {
   return CiudadGPS.findOne({ esCentral: true, deletedAt: null });
 }
 
+/**
+ * Resumen global de equipos INSTALADO, agrupado por marca/modelo con desglose
+ * por condición. Los instalados no pertenecen al inventario de ninguna ciudad
+ * (no sabemos su ubicación real), por eso se reportan en su propia sección.
+ */
+async function resumenInstaladosGlobal() {
+  const agg = await EquipoGPS.aggregate([
+    { $match: { deletedAt: null, estado: "INSTALADO" } },
+    {
+      $lookup: {
+        from: "marcagps",
+        localField: "marca",
+        foreignField: "_id",
+        as: "_marca",
+      },
+    },
+    {
+      $lookup: {
+        from: "modelogps",
+        localField: "modelo",
+        foreignField: "_id",
+        as: "_modelo",
+      },
+    },
+    {
+      $group: {
+        _id: {
+          marca: { $arrayElemAt: ["$_marca.nombre", 0] },
+          modelo: { $arrayElemAt: ["$_modelo.nombre", 0] },
+          condicion: "$condicion",
+        },
+        total: { $sum: 1 },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        marca: "$_id.marca",
+        modelo: "$_id.modelo",
+        condicion: "$_id.condicion",
+        total: 1,
+      },
+    },
+    { $sort: { marca: 1, modelo: 1 } },
+  ]);
+
+  const map = {};
+  for (const r of agg) {
+    const key = `${r.marca || "?"} ${r.modelo || "?"}`;
+    if (!map[key]) {
+      map[key] = { marca: r.marca, modelo: r.modelo, nuevos: 0, segunda: 0, total: 0 };
+    }
+    if (r.condicion === "NUEVO") map[key].nuevos += r.total;
+    else if (r.condicion === "SEGUNDA") map[key].segunda += r.total;
+    map[key].total += r.total;
+  }
+  const modelos = Object.values(map);
+  return {
+    totalEquipos: modelos.reduce((s, m) => s + m.total, 0),
+    modelos,
+  };
+}
+
 exports.crearEquipo = async (req, res) => {
   try {
     const { marca, modelo, ciudad } = req.body;
@@ -787,19 +875,29 @@ exports.inventarioCentral = async (req, res) => {
       .populate("modelo", "nombre")
       .lean();
 
-    // Resumen por marca/modelo
-    const resumen = {};
+    // Resumen por marca/modelo con desglose por condición (NUEVO/SEGUNDA).
+    const resumenMap = {};
     for (const e of equipos) {
-      const key = `${e.marca?.nombre || "?"} / ${e.modelo?.nombre || "?"}`;
-      resumen[key] = (resumen[key] || 0) + 1;
+      const marca = e.marca?.nombre || "?";
+      const modelo = e.modelo?.nombre || "?";
+      const key = `${marca} / ${modelo}`;
+      if (!resumenMap[key]) {
+        resumenMap[key] = { marca, modelo, nuevos: 0, segunda: 0, total: 0 };
+      }
+      if (e.condicion === "SEGUNDA") resumenMap[key].segunda += 1;
+      else resumenMap[key].nuevos += 1;
+      resumenMap[key].total += 1;
     }
+    const resumenPorModelo = Object.values(resumenMap).sort((a, b) =>
+      `${a.marca} ${a.modelo}`.localeCompare(`${b.marca} ${b.modelo}`),
+    );
 
     res.json({
       success: true,
       data: {
         ciudadCentral: central.nombre,
         totalDisponibles: equipos.length,
-        resumenPorModelo: resumen,
+        resumenPorModelo,
         equipos,
       },
     });
@@ -1746,8 +1844,10 @@ exports.reporteInventarioPorCiudad = async (req, res) => {
       incluirEnRevision = "true",
     } = req.query;
 
+    // Los equipos INSTALADO NO se cuentan dentro de la ciudad: una vez
+    // instalados no sabemos su ubicación real, así que se reportan en una
+    // sección global aparte (ver `instalados` más abajo).
     const estadosVisibles = ["DISPONIBLE"];
-    if (incluirInstalados === "true") estadosVisibles.push("INSTALADO");
     if (incluirEnTransito === "true") {
       estadosVisibles.push("EN_TRANSITO");
       estadosVisibles.push("EN_POSESION_TECNICO");
@@ -1872,6 +1972,12 @@ exports.reporteInventarioPorCiudad = async (req, res) => {
     // Texto plano global
     const textoGlobal = tabla.map((t) => t.resumen).join(" | ");
 
+    // ─── Sección global de INSTALADOS (fuera de ciudad) ───
+    let instalados = null;
+    if (incluirInstalados === "true") {
+      instalados = await resumenInstaladosGlobal();
+    }
+
     res.json({
       success: true,
       data: {
@@ -1879,6 +1985,7 @@ exports.reporteInventarioPorCiudad = async (req, res) => {
         totalCiudades: tabla.length,
         totalEquipos: tabla.reduce((s, t) => s + t.totalEquipos, 0),
         tabla,
+        instalados,
         resumenTexto: textoGlobal,
       },
     });
@@ -2336,6 +2443,135 @@ exports.obtenerActividad = async (req, res) => {
   }
 };
 
+/**
+ * PUT /actividades/:id
+ * Edición SEGURA de una actividad: solo permite cambiar datos que NO mueven el
+ * inventario (placa, línea/SIM, número SIM, propiedad/propietario, fecha y
+ * observaciones). NO se permite cambiar equipo instalado/retirado, técnico,
+ * ciudad ni tipo de actividad, porque eso requeriría revertir y re-aplicar los
+ * movimientos de inventario. Para esos casos: eliminar y volver a crear.
+ *
+ * Los cambios de placa/SIM/propiedad se sincronizan al equipo instalado.
+ */
+exports.actualizarActividad = async (req, res) => {
+  try {
+    const actividad = await ActividadGPS.findOne({
+      _id: req.params.id,
+      deletedAt: null,
+    });
+    if (!actividad)
+      return res
+        .status(404)
+        .json({ success: false, message: "Actividad no encontrada" });
+
+    const {
+      placaInstalada,
+      lineaSim,
+      numeroSim,
+      tipoPropiedad,
+      propietarioNombre,
+      fechaActividad,
+      observaciones,
+    } = req.body;
+
+    // Propiedad / propietario (auto-completar para COMODATO)
+    const tipoPropFinal =
+      tipoPropiedad !== undefined ? tipoPropiedad : actividad.tipoPropiedad;
+    let propFinal =
+      propietarioNombre !== undefined
+        ? propietarioNombre
+        : actividad.propietarioNombre;
+    if (tipoPropFinal === "COMODATO") propFinal = propFinal || "ASEGURAR LTDA";
+
+    // Resolver vehículo si cambia la placa
+    let vehiculoRef = actividad.vehiculo;
+    let placaFinal = actividad.placaInstalada;
+    if (placaInstalada !== undefined) {
+      placaFinal = placaInstalada ? placaInstalada.toUpperCase() : placaInstalada;
+      vehiculoRef = null;
+      if (placaFinal) {
+        const veh = await Vehiculo.findOne({
+          placa: placaFinal,
+          deletedAt: null,
+        })
+          .select("_id")
+          .lean();
+        if (veh) vehiculoRef = veh._id;
+      }
+    }
+
+    if (placaInstalada !== undefined) {
+      actividad.placaInstalada = placaFinal;
+      actividad.vehiculo = vehiculoRef;
+    }
+    if (lineaSim !== undefined) actividad.lineaSim = lineaSim || null;
+    if (numeroSim !== undefined) actividad.numeroSim = numeroSim || null;
+    actividad.tipoPropiedad = tipoPropFinal;
+    actividad.propietarioNombre = propFinal;
+    if (fechaActividad !== undefined && fechaActividad)
+      actividad.fechaActividad = new Date(fechaActividad);
+    if (observaciones !== undefined) actividad.observaciones = observaciones || null;
+
+    await actividad.save();
+
+    // Sincronizar el equipo instalado (si sigue vinculado y no eliminado).
+    if (actividad.equipoInstalado) {
+      const equipo = await EquipoGPS.findOne({
+        _id: actividad.equipoInstalado,
+        deletedAt: null,
+      });
+      if (equipo) {
+        if (placaInstalada !== undefined) {
+          equipo.placaInstalada = placaFinal;
+          if (vehiculoRef) equipo.vehiculoInstalado = vehiculoRef;
+        }
+        if (lineaSim !== undefined) equipo.lineaSim = lineaSim || null;
+        if (numeroSim !== undefined) equipo.numeroSim = numeroSim || null;
+        equipo.tipoPropiedad = tipoPropFinal;
+        equipo.propietarioNombre = propFinal;
+        equipo.historial.push({
+          accion: "ACTUALIZADO",
+          estadoAnterior: equipo.estado,
+          estadoNuevo: equipo.estado,
+          usuario: req.user?.userId || null,
+          fecha: new Date(),
+          observaciones: "Datos sincronizados por edición de actividad",
+        });
+        await equipo.save();
+      }
+    }
+
+    const populated = await ActividadGPS.findById(actividad._id)
+      .populate("tecnico", "nombres apellidos identificacion")
+      .populate("ciudad", "nombre esCentral")
+      .populate({
+        path: "equipoInstalado",
+        populate: [
+          { path: "marca", select: "nombre" },
+          { path: "modelo", select: "nombre" },
+        ],
+      })
+      .populate({
+        path: "equipoRetirado",
+        populate: [
+          { path: "marca", select: "nombre" },
+          { path: "modelo", select: "nombre" },
+        ],
+      })
+      .populate("vehiculo", "placa numeroInterno")
+      .lean();
+
+    res.json({
+      success: true,
+      message: "Actividad actualizada",
+      data: populated,
+    });
+  } catch (error) {
+    logger.error(`Error actualizando actividad GPS: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 exports.eliminarActividad = async (req, res) => {
   try {
     const actividad = await ActividadGPS.findOne({
@@ -2573,9 +2809,9 @@ exports.dashboard = async (req, res) => {
       },
     ]);
 
-    // ─── Ciudades con más inventario ───
+    // ─── Ciudades con más inventario (INSTALADO se excluye del conteo por ciudad) ───
     const ciudadesAgg = await EquipoGPS.aggregate([
-      { $match: { deletedAt: null } },
+      { $match: { deletedAt: null, estado: { $ne: "INSTALADO" } } },
       {
         $group: {
           _id: { ciudad: "$ciudad", estado: "$estado" },
@@ -2992,6 +3228,7 @@ exports.reporteGeneral = async (req, res) => {
     const asignaciones = Object.values(asignacionesPorTecnico);
 
     // ─── 5. Tabla resumen por ciudad (modelo + condición) ───
+    // INSTALADO se excluye del inventario por ciudad y se reporta aparte.
     const filasCiudad = await EquipoGPS.aggregate([
       {
         $match: {
@@ -3001,7 +3238,6 @@ exports.reporteGeneral = async (req, res) => {
               "DISPONIBLE",
               "EN_TRANSITO",
               "EN_POSESION_TECNICO",
-              "INSTALADO",
               "EN_REVISION",
             ],
           },
@@ -3117,10 +3353,15 @@ exports.reporteGeneral = async (req, res) => {
 
     const resumenTexto = tablaPorCiudad.map((t) => t.resumen).join(" | ");
 
+    // Equipos instalados, fuera del conteo por ciudad.
+    const instalados = await resumenInstaladosGlobal();
+
     res.json({
       success: true,
       data: {
         rango: { desde, hasta, etiqueta },
+
+        instalados,
 
         kpis: {
           totalEquipos: porEstadoAgg.reduce((s, x) => s + x.total, 0),

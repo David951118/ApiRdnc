@@ -110,6 +110,7 @@ router.post(
 router.post("/actividades", validate(v.crearActividad), ctrl.crearActividad);
 router.get("/actividades", ctrl.listarActividades);
 router.get("/actividades/:id", ctrl.obtenerActividad);
+router.put("/actividades/:id", validate(v.updateActividad), ctrl.actualizarActividad);
 router.delete("/actividades/:id", ctrl.eliminarActividad);
 router.post("/actividades/:id/restore", ctrl.restoreActividad);
 router.delete("/actividades/:id/hard", ctrl.hardDeleteActividad);

@@ -213,6 +213,26 @@ const crearActividad = Joi.object({
   return value;
 }, "validación condicional de equipo retirado");
 
+// Edición segura de actividad: solo datos que no mueven inventario.
+const updateActividad = Joi.object({
+  placaInstalada: Joi.string().trim().uppercase().min(3).max(20).optional(),
+  lineaSim: Joi.string().trim().allow("", null),
+  numeroSim: Joi.string().trim().allow("", null),
+  tipoPropiedad: Joi.string().valid("PROPIO", "COMODATO").optional(),
+  propietarioNombre: Joi.string()
+    .trim()
+    .when("tipoPropiedad", {
+      is: "PROPIO",
+      then: Joi.required().messages({
+        "any.required":
+          "propietarioNombre es obligatorio cuando tipoPropiedad=PROPIO",
+      }),
+      otherwise: Joi.optional().allow("", null),
+    }),
+  fechaActividad: Joi.date().optional(),
+  observaciones: Joi.string().trim().allow("", null),
+}).min(1);
+
 const buscarEquipoQuery = Joi.object({
   imei: Joi.string().trim().min(3).optional(),
   serial: Joi.string().trim().min(3).optional(),
@@ -267,6 +287,7 @@ module.exports = {
   enviarGarantia,
   recibirGarantia,
   crearActividad,
+  updateActividad,
   buscarEquipoQuery,
   enviarPaquete,
   confirmarRecepcion,
