@@ -73,6 +73,7 @@ connectDB().then(() => {
   require("./workers/reportRMM");
   require("./workers/detectRNMM");
   require("./workers/reportRNMM");
+  require("./workers/cerrarManifiestosVencidos").init();
   require("./workers/actualizarEstadoDocumentos");
   require("./workers/vencerNovedadesPreop");
 

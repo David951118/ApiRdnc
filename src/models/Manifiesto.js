@@ -125,12 +125,20 @@ const manifiestoSchema = new mongoose.Schema(
     },
 
     // Estado del manifiesto
+    //  - activo: en monitoreo
+    //  - completado: todos los puntos cumplidos
+    //  - vencido: pasaron 24h desde la última cita sin llegada del vehículo
+    //  - anulado: el RNDC notificó anulación
     estado: {
       type: String,
-      enum: ["activo", "completado", "anulado"],
+      enum: ["activo", "completado", "vencido", "anulado"],
       default: "activo",
       index: true,
     },
+    // Fecha en que el worker cerró el manifiesto como vencido y, si aplica,
+    // desasignó el vehículo del usuario RNDC en Cellvi.
+    fechaCierreVencido: Date,
+    vehiculoDesasignado: { type: Boolean, default: false },
 
     // Puntos de control
     puntosControl: [puntoControlSchema],

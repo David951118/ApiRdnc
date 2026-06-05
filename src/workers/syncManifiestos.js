@@ -235,21 +235,41 @@ async function procesarManifiesto(doc, placasAsignadas, stats) {
   }
 
   // Save or Update Manifest
+  //
+  // IMPORTANTE: El RNDC entrega el mismo manifiesto en cada consulta "todos".
+  // Si reemplazamos `puntosControl` y `estado` en cada sync, perdemos el estado
+  // de monitoreo (fechaHoraLlegada, rmmId, "en_punto", "completado", etc.).
+  // Eso causaba que el segundo punto quedara "pendiente" para siempre.
+  //
+  // Solución: campos inmutables o que el worker mantiene se setean SOLO al
+  // insertar el manifiesto la primera vez ($setOnInsert). Los metadatos que
+  // pueden cambiar legítimamente desde RNDC ($set) sí se actualizan siempre.
   const resultado = await Manifiesto.findOneAndUpdate(
     { ingresoidManifiesto: ingresoid },
     {
-      numManifiesto,
-      nitEmpresaTransporte: doc.numnitempresatransporte,
-      placa,
-      fechaExpedicion,
-      vehiculoAsignado,
-      esMonitoreable,
-      motivoNoMonitoreable,
-      estado: "activo", // Always save as active initially
-      puntosControl,
-      datosOriginales: doc,
+      $set: {
+        // Metadatos que pueden cambiar entre syncs
+        vehiculoAsignado,
+        esMonitoreable,
+        motivoNoMonitoreable,
+        datosOriginales: doc,
+      },
+      $setOnInsert: {
+        // Solo al crear: campos a cargo del worker monitor y/o inmutables.
+        numManifiesto,
+        nitEmpresaTransporte: doc.numnitempresatransporte,
+        placa,
+        fechaExpedicion,
+        estado: "activo",
+        puntosControl,
+      },
     },
-    { upsert: true, new: true, rawResult: true },
+    {
+      upsert: true,
+      new: true,
+      rawResult: true,
+      setDefaultsOnInsert: true,
+    },
   );
 
   const accion = resultado.lastErrorObject?.upserted ? "New" : "Updated";
