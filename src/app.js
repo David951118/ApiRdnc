@@ -76,6 +76,8 @@ connectDB().then(() => {
   require("./workers/cerrarManifiestosVencidos").init();
   require("./workers/actualizarEstadoDocumentos");
   require("./workers/vencerNovedadesPreop");
+  require("./workers/alertasMantenimiento");
+  require("./workers/reporteGerencial");
 
   logger.info("Workers initialized successfully");
 });
@@ -97,6 +99,10 @@ app.use("/api/auth", authRoutes);
 app.use("/api/verificar", require("./routes/verificacion"));
 app.use("/api/contacto", require("./routes/contacto"));
 
+// Auditoría transversal: registra toda mutación exitosa de usuarios autenticados.
+// No exige auth por sí mismo (lee req.user al finalizar la respuesta).
+app.use("/api", require("./middleware/auditLogger"));
+
 // Routes protegidas (requieren autenticación)
 app.use("/api", authenticate, indexRoutes);
 app.use("/api/manifiestos", authenticate, manifiestosRoutes);
@@ -115,6 +121,11 @@ app.use("/api/empresas", authenticate, require("./routes/empresas"));
 app.use("/api/contratos", authenticate, require("./routes/contratos"));
 app.use("/api/rutas", authenticate, require("./routes/rutas"));
 app.use("/api/estadisticas", authenticate, require("./routes/estadisticas"));
+app.use("/api/mantenimiento", authenticate, require("./routes/mantenimiento"));
+app.use("/api/inventario", authenticate, require("./routes/inventario"));
+app.use("/api/operacion", authenticate, require("./routes/operacion"));
+app.use("/api/telemetria", authenticate, require("./routes/telemetria"));
+app.use("/api/auditoria", authenticate, require("./routes/auditoria"));
 app.use("/api/gps", require("./routes/gps"));
 
 // 404 Handler

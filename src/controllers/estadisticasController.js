@@ -4,6 +4,7 @@ const Tercero = require("../models/Tercero");
 const ContratoFuec = require("../models/ContratoFUEC");
 const Preoperacional = require("../models/Preoperacional");
 const Documento = require("../models/Documento");
+const kpiService = require("../services/kpiService");
 const logger = require("../config/logger");
 
 // Helper de roles inline
@@ -299,6 +300,34 @@ exports.getGlobal = async (req, res) => {
     });
   } catch (error) {
     logger.error(`Error generando estadísticas globales: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * GET /api/estadisticas/kpis
+ * Dashboard gerencial: costo por km, disponibilidad, % preventivo vs correctivo,
+ * ranking de vehículos más costosos.
+ * Query: ?desde= &hasta= (rango opcional). ADMIN = toda la flota; CLIENTE_ADMIN = su empresa.
+ */
+exports.getKpisGerenciales = async (req, res) => {
+  try {
+    const { isAdmin } = getRoles(req);
+    const empresaId = isAdmin ? req.query.empresa || null : req.user?.empresaId;
+
+    if (!isAdmin && !empresaId) {
+      return res.json({ success: true, data: null });
+    }
+
+    const data = await kpiService.kpisGerenciales({
+      empresaId,
+      desde: req.query.desde,
+      hasta: req.query.hasta,
+    });
+
+    res.json({ success: true, data, generadoEn: new Date().toISOString() });
+  } catch (error) {
+    logger.error(`Error generando KPIs gerenciales: ${error.message}`);
     res.status(500).json({ success: false, message: error.message });
   }
 };

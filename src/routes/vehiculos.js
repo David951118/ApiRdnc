@@ -32,6 +32,14 @@ router.get(
 // Obtener lista por idCellvi
 router.get("/cellvi/:idCellvi", authenticate, vehiculoController.getByCellviId);
 
+// Kilometraje actual combinando fuentes (Cellvi GPS → preoperacional → manual)
+// ?actualizar=true persiste el resultado en el vehículo
+router.get(
+  "/:id/kilometraje",
+  authenticate,
+  vehiculoController.getKilometraje,
+);
+
 // Obtener por ID o Placa
 router.get("/:id", authenticate, vehiculoController.getOne);
 

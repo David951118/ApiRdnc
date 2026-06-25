@@ -12,6 +12,14 @@ router.get(
   estadisticasController.getGlobal,
 );
 
+// KPIs gerenciales: costo/km, disponibilidad, preventivo vs correctivo, ranking
+router.get(
+  "/kpis",
+  authenticate,
+  checkRole(["ADMIN", "CLIENTE_ADMIN", "AUDITOR"]),
+  estadisticasController.getKpisGerenciales,
+);
+
 // Estadísticas de documentos (ADMIN global, CLIENTE_ADMIN su empresa)
 router.get(
   "/documentos",

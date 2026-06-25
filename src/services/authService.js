@@ -77,6 +77,15 @@ class AuthService {
         logger.info(
           `Tercero asociado encontrado: ${terceroAsociado.nombres || terceroAsociado.razonSocial}`,
         );
+
+        // Mezclar roles locales del sistema (MECANICO/AUDITOR) con los de Cellvi
+        const rolesLocales = terceroAsociado.rolesSistema || [];
+        if (rolesLocales.length > 0) {
+          userInfo.roles = [...new Set([...userInfo.roles, ...rolesLocales])];
+          logger.info(
+            `Roles locales agregados a ${username}: ${rolesLocales.join(", ")}`,
+          );
+        }
       }
 
       // 5. Crear token JWT propio del API RNDC

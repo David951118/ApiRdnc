@@ -5,6 +5,7 @@ const Preoperacional = require("../models/Preoperacional");
 const ContratoFuec = require("../models/ContratoFUEC");
 const { getVehicleScope } = require("../utils/dataScope");
 const { deleteDocumentosWithS3, cleanEntidadesAsociadas } = require("../helpers/cascadeDelete");
+const kilometrajeService = require("../services/kilometrajeService");
 const logger = require("../config/logger");
 
 /**
@@ -162,6 +163,49 @@ exports.getOne = async (req, res) => {
     res.json({ success: true, data: vehiculoConDocs });
   } catch (error) {
     logger.error(`Error obteniendo vehículo: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Obtener kilometraje actual del vehículo combinando fuentes
+ * GET /api/vehiculos/:id/kilometraje
+ * Query: ?actualizar=true → persiste el km resuelto en el vehículo
+ */
+exports.getKilometraje = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const query = id.match(/^[0-9a-fA-F]{24}$/)
+      ? { _id: id, deletedAt: null }
+      : { placa: id.toUpperCase(), deletedAt: null };
+
+    const vehiculo = await Vehiculo.findOne(query);
+    if (!vehiculo)
+      return res
+        .status(404)
+        .json({ success: false, message: "Vehículo no encontrado" });
+
+    const resultado =
+      await kilometrajeService.resolverKilometraje(vehiculo);
+
+    if (req.query.actualizar === "true" && resultado.kilometraje != null) {
+      vehiculo.kilometrajeActual = resultado.kilometraje;
+      vehiculo.ultimaActualizacionKm = new Date();
+      vehiculo.fuenteKilometraje = resultado.fuente;
+      await vehiculo.save();
+    }
+
+    res.json({
+      success: true,
+      data: {
+        placa: vehiculo.placa,
+        idCellvi: vehiculo.idCellvi,
+        ...resultado,
+        actualizado: req.query.actualizar === "true",
+      },
+    });
+  } catch (error) {
+    logger.error(`Error obteniendo kilometraje: ${error.message}`);
     res.status(500).json({ success: false, message: error.message });
   }
 };

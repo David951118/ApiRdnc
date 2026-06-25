@@ -33,6 +33,11 @@ const VehiculoSchema = new Schema(
     capacidadPasajeros: { type: Number, required: true },
     fechaMatricula: { type: Date, required: true },
 
+    // Capacidad de carga (operación logística / distribución)
+    // Se usan para detectar sobrecarga en la bitácora de viajes.
+    capacidadCargaKg: { type: Number }, // carga útil recomendada
+    pesoMaximoKg: { type: Number }, // tope técnico/legal (PBV - tara)
+
     // Propiedad
     propietario: { type: Schema.Types.ObjectId, ref: "Tercero" },
     // Conductores adicionales asignados al vehículo (más allá del propietario).
@@ -51,6 +56,12 @@ const VehiculoSchema = new Schema(
     },
     kilometrajeActual: Number, // Sync con GPSCellvi
     ultimaActualizacionKm: Date,
+    // Origen del último kilometraje guardado (ver services/kilometrajeService.js)
+    fuenteKilometraje: {
+      type: String,
+      enum: ["CELLVI_GPS", "PREOPERACIONAL", "MANUAL"],
+      default: null,
+    },
 
     // Historial de Mantenimientos (Resumen)
     mantenimientos: [

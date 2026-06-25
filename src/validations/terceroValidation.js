@@ -65,6 +65,7 @@ const createTercero = Joi.object({
         "CLIENTE",
         "ADMINISTRATIVO",
         "PROVEEDOR",
+        "MECANICO",
       ),
     )
     .min(1)
@@ -72,6 +73,11 @@ const createTercero = Joi.object({
     .messages({
       "array.min": "Debe asignar al menos un rol",
     }),
+
+  // Roles de acceso locales (se suman a los de Cellvi al hacer login)
+  rolesSistema: Joi.array()
+    .items(Joi.string().valid("ROLE_MECANICO", "ROLE_AUDITOR"))
+    .optional(),
 
   // Contacto (simplificado para datos personales si hay empresa)
   contacto: Joi.object({

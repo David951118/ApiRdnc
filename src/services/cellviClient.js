@@ -329,6 +329,53 @@ class CellviClient {
   }
 
   /**
+   * Obtener el recorrido (ruta fraccionada) de un vehículo entre dos fechas.
+   * POST /cellvi/reporte/v2/ruta_fraccionada
+   * Body: { vehiculo: <idCellvi>, fechaInicial, fechaFinal }
+   *
+   * ⚠️ Endpoint pesado en Cellvi (suben memoria/timeout). Usar rangos cortos.
+   * Retorna el array de posiciones tal cual lo entrega Cellvi; la normalización
+   * (lat/lng) se hace en el servicio de telemetría porque el formato puede variar.
+   *
+   * Path confirmado contra el código de Cellvi (apicellvi GeoPointController):
+   * los endpoints de reporte (ruta_fraccionada v2/v3) SOLO generan PDF/Excel,
+   * nunca JSON. El endpoint que devuelve los puntos crudos en JSON es
+   * /cellvi/geopoint/ruta/vehiculo/fecha (action rutaVehiculoPorFecha).
+   * Configurable vía CELLVI_RECORRIDO_PATH.
+   */
+  async getRecorrido(idCellvi, fechaInicial, fechaFinal) {
+    try {
+      const path =
+        process.env.CELLVI_RECORRIDO_PATH ||
+        process.env.CELLVI_RUTA_FRACCIONADA_PATH ||
+        "/cellvi/geopoint/ruta/vehiculo/fecha";
+
+      logger.debug(
+        `Consultando recorrido vehículo ${idCellvi} (${fechaInicial} → ${fechaFinal})`,
+      );
+
+      const response = await this.axiosInstance.post(
+        path,
+        {
+          vehiculo: idCellvi,
+          fechaInicial,
+          fechaFinal,
+        },
+        { timeout: 120000 }, // recorridos pueden tardar
+      );
+
+      return Array.isArray(response.data)
+        ? response.data
+        : response.data?.data || [];
+    } catch (error) {
+      logger.error(
+        `Error consultando recorrido vehículo ${idCellvi}: ${error.message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
    * Health check de la API Cellvi
    */
   async healthCheck() {

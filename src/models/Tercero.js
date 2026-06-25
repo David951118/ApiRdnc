@@ -49,8 +49,19 @@ const TerceroSchema = new Schema(
           "CLIENTE",
           "ADMINISTRATIVO",
           "PROVEEDOR",
+          "MECANICO",
         ],
         required: true,
+      },
+    ],
+
+    // Roles de acceso locales que se SUMAN a los roles de Cellvi al hacer login
+    // (los roles base ROLE_ADMIN/ROLE_CLIENTE_ADMIN/ROLE_USER vienen de Cellvi).
+    // Permiten otorgar MECANICO o AUDITOR sin tocar la plataforma Cellvi.
+    rolesSistema: [
+      {
+        type: String,
+        enum: ["ROLE_MECANICO", "ROLE_AUDITOR"],
       },
     ],
 
