@@ -1511,6 +1511,93 @@ exports.validarCorreccion = async (req, res) => {
 };
 
 /**
+ * Aprobar una preoperacional "de todos modos" (ADMIN/CLIENTE_ADMIN).
+ * PUT /api/preoperacionales/:id/aprobar-forzado
+ * Body: { observaciones: "..." }  (obligatorio, mín. 5 chars)
+ *
+ * Resuelve el atasco de las novedades NO corregibles (salud, sueño, sustancias):
+ * marca TODAS las novedades pendientes como resueltas/VALIDADA y fuerza el
+ * estadoGeneral a APROBADO, dejando trazabilidad en el historial y una anotación.
+ */
+exports.aprobarForzado = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { observaciones } = req.body;
+
+    if (!observaciones || observaciones.trim().length < 5) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Debe indicar una observación del motivo de la aprobación (mínimo 5 caracteres)",
+      });
+    }
+
+    const preop = await Preoperacional.findOne({ _id: id, deletedAt: null });
+    if (!preop) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Preoperacional no encontrada" });
+    }
+
+    if (preop.estadoGeneral === "APROBADO") {
+      return res
+        .status(400)
+        .json({ success: false, message: "La preoperacional ya está APROBADA" });
+    }
+
+    const userId = req.user?.userId || null;
+    const ahora = new Date();
+    const rolesNormalized = (req.user?.roles || []).map((r) =>
+      r.replace("ROLE_", "").toUpperCase(),
+    );
+    const motivo = observaciones.trim();
+
+    // Marca como resueltas todas las novedades que sigan pendientes
+    // (incluidas las NO corregibles de salud/sueño/sustancias, que de otro modo
+    // dejan la preoperacional atascada en NOVEDAD para siempre).
+    let resueltas = 0;
+    preop.novedades.forEach((nov) => {
+      if (!nov.resuelta || nov.estadoCorreccion !== "VALIDADA") {
+        nov.resuelta = true;
+        nov.estadoCorreccion = "VALIDADA";
+        nov.validadaPor = userId;
+        nov.fechaValidacion = ahora;
+        nov.observacionesValidacion = motivo;
+        nov.historial.push({
+          accion: "VALIDADA",
+          usuario: userId,
+          fecha: ahora,
+          detalle: `Aprobación manual del administrador: ${motivo}`,
+        });
+        resueltas++;
+      }
+    });
+
+    preop.estadoGeneral = "APROBADO";
+
+    preop.anotaciones.push({
+      texto: `Preoperacional APROBADA manualmente por el administrador. Motivo: ${motivo}`,
+      tipo: "VALIDACION",
+      autor: userId,
+      autorNombre: req.user?.username || null,
+      rol: rolesNormalized[0] || null,
+      fecha: ahora,
+    });
+
+    await preop.save({ validateBeforeSave: false });
+
+    res.json({
+      success: true,
+      message: `Preoperacional APROBADA. ${resueltas} novedad(es) marcada(s) como resueltas.`,
+      data: preop,
+    });
+  } catch (error) {
+    logger.error(`Error en aprobación forzada: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
  * Rechazar corrección de una novedad (ADMIN/CLIENTE_ADMIN)
  * PUT /api/preoperacionales/:id/novedades/:novedadId/rechazar
  * Body: { motivo: "La foto no muestra la reparación" }

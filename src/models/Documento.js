@@ -113,6 +113,11 @@ const DocumentoSchema = new Schema(
 
     observaciones: String,
 
+    // Purga de archivos S3: tras 1 año de vencido, el worker elimina los
+    // archivos físicos de S3 pero conserva este registro como referencia.
+    archivosPurgados: { type: Boolean, default: false },
+    fechaPurgaS3: { type: Date, default: null },
+
     // Auditoría
     // Se almacena el identificador/username del usuario que sube el documento
     // (viene de req.user.userId / username, no de la colección User local)

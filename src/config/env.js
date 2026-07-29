@@ -39,6 +39,14 @@ module.exports = {
     adminPassword: process.env.CELLVI_ADMIN_PASSWORD,
   },
 
+  // Autenticación / sesiones
+  auth: {
+    jwtSecret: process.env.JWT_SECRET || "CHANGE_THIS_SECRET_IN_PRODUCTION",
+    // Duración de la sesión en minutos. Por defecto una jornada (8h) para evitar
+    // caducidades a mitad de turno; ajustable con SESSION_DURATION_MIN.
+    sessionDurationMin: parseInt(process.env.SESSION_DURATION_MIN || "480"),
+  },
+
   // Geocercas
   geofence: {
     checkInterval: parseInt(process.env.GEOFENCE_CHECK_INTERVAL || "60000"), // 1 minuto

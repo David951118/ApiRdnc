@@ -4,6 +4,7 @@ const Documento = require("../models/Documento");
 const Preoperacional = require("../models/Preoperacional");
 const ContratoFuec = require("../models/ContratoFUEC");
 const { getVehicleScope } = require("../utils/dataScope");
+const { getVehiculoScope } = require("../services/vehiculoAccessService");
 const { deleteDocumentosWithS3, cleanEntidadesAsociadas } = require("../helpers/cascadeDelete");
 const kilometrajeService = require("../services/kilometrajeService");
 const logger = require("../config/logger");
@@ -57,7 +58,10 @@ exports.getAll = async (req, res) => {
   try {
     const { page = 1, limit = 50, placa, includeDeleted = false } = req.query;
 
-    const scopeQuery = getVehicleScope(req);
+    // Scope por EMPRESA (no por placa): ADMIN/SUPER ven todo; CLIENTE_ADMIN ve los
+    // vehículos de su empresa (incluidos los recién creados en la plataforma, que
+    // aún no están en su asignación de placas de Cellvi); demás roles, sus asignados.
+    const scopeQuery = await getVehiculoScope(req);
     const conditions = [];
 
     if (Object.keys(scopeQuery).length > 0) {
@@ -74,6 +78,7 @@ exports.getAll = async (req, res) => {
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const vehiculos = await Vehiculo.find(query)
+      .sort({ createdAt: -1 }) // más recientes primero: lo recién creado se ve arriba
       .limit(parseInt(limit))
       .skip(skip)
       .populate("propietario", "nombres apellidos razonSocial identificacion")
@@ -102,15 +107,23 @@ exports.getAll = async (req, res) => {
 exports.getList = async (req, res) => {
   try {
     const { page = 1, limit = 50, search, includeDeleted = false } = req.query;
-    const query = {};
 
+    // Mismo scope por EMPRESA que getAll: ADMIN/SUPER_ADMIN ven todo;
+    // CLIENTE_ADMIN ve los vehículos de su empresa; demás roles, sus asignados.
+    const scopeQuery = await getVehiculoScope(req);
+    const conditions = [];
+
+    if (Object.keys(scopeQuery).length > 0) {
+      conditions.push(scopeQuery);
+    }
     if (!includeDeleted || includeDeleted === "false") {
-      query.deletedAt = null;
+      conditions.push({ deletedAt: null });
+    }
+    if (search) {
+      conditions.push({ placa: new RegExp(search, "i") });
     }
 
-    if (search) {
-      query.placa = new RegExp(search, "i");
-    }
+    const query = conditions.length > 0 ? { $and: conditions } : {};
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const vehiculos = await Vehiculo.find(query)

@@ -10,7 +10,10 @@ const itemPlan = Joi.object({
   intervaloDias: Joi.number().integer().min(1).allow(null),
   umbralAlertaKm: Joi.number().integer().min(0),
   umbralAlertaDias: Joi.number().integer().min(0),
-}).or("intervaloKm", "intervaloDias"); // al menos un intervalo
+  // Mantenimiento único a un km objetivo (one-shot)
+  unaVez: Joi.boolean(),
+  kmObjetivo: Joi.number().integer().min(1).allow(null),
+}).or("intervaloKm", "intervaloDias", "kmObjetivo"); // intervalo o km objetivo
 
 const createPlan = Joi.object({
   nombre: Joi.string().required(),

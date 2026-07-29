@@ -21,6 +21,12 @@ const ItemPlanSchema = new Schema(
     // Anticipación de la alerta (cuánto antes avisar)
     umbralAlertaKm: { type: Number, default: 500 },
     umbralAlertaDias: { type: Number, default: 15 },
+    // Mantenimiento ÚNICO (one-shot): un solo servicio a un kilometraje objetivo
+    // ABSOLUTO (ej. vehículo en 20.000 → servicio a los 27.000, solo esa vez).
+    // Cuando unaVez=true se ignoran los intervalos y, una vez cerrada la OT del
+    // ítem, no vuelve a generar alertas.
+    unaVez: { type: Boolean, default: false },
+    kmObjetivo: Number, // km absoluto del único servicio (solo si unaVez)
   },
   { _id: true },
 );

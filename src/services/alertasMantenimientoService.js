@@ -51,8 +51,10 @@ async function vehiculosDelPlan(plan) {
 
 /**
  * Evalúa un ítem del plan para un vehículo.
+ * @param {number|null} kmBase - km de referencia del vehículo (kilometrajeBaseMantenimiento)
+ *        usado como ancla del primer servicio cuando aún no hay OT cerrada.
  */
-function evaluarItem(item, ultimaOT, kmActual, hoy) {
+function evaluarItem(item, ultimaOT, kmActual, hoy, kmBase = null) {
   const resultado = {
     item: item.nombre,
     itemId: item._id,
@@ -62,6 +64,7 @@ function evaluarItem(item, ultimaOT, kmActual, hoy) {
       ? { fecha: ultimaOT.fechaCierre, kilometraje: ultimaOT.kilometraje, ot: ultimaOT.numero }
       : null,
     kmActual,
+    proximoKm: null,
     kmRestantes: null,
     diasRestantes: null,
     sinHistorial: false,
@@ -69,18 +72,44 @@ function evaluarItem(item, ultimaOT, kmActual, hoy) {
     estado: "OK",
   };
 
+  // ── Mantenimiento ÚNICO (one-shot) a un km objetivo absoluto ──
+  // Ignora los intervalos. Si ya hay una OT cerrada del ítem, el servicio único
+  // ya se hizo → OK definitivo (no vuelve a alertar). Si no, compara el km actual
+  // contra el km objetivo.
+  if (item.unaVez && item.kmObjetivo != null) {
+    resultado.unaVez = true;
+    resultado.kmObjetivo = item.kmObjetivo;
+    if (ultimaOT) {
+      resultado.estado = "OK";
+      resultado.completado = true;
+      return resultado;
+    }
+    resultado.proximoKm = item.kmObjetivo;
+    if (kmActual != null) {
+      resultado.kmRestantes = item.kmObjetivo - kmActual;
+      if (resultado.kmRestantes <= 0) resultado.estado = "VENCIDO";
+      else if (resultado.kmRestantes <= (item.umbralAlertaKm || 500))
+        resultado.estado = "PROXIMO";
+    }
+    return resultado;
+  }
+
   if (!ultimaOT) {
     resultado.estado = "SIN_HISTORIAL";
     resultado.sinHistorial = true;
-    // No hay OT de referencia (baseline). Estimamos el km restante asumiendo que el
-    // servicio se realiza en múltiplos del intervalo desde 0 km; así se muestra un
-    // número útil y se avisa cuando se acerca, aunque falte registrar la primera OT.
+    // No hay OT de referencia. El ancla es el km base del vehículo (foto del km al
+    // ingresar al plan): el primer servicio va en kmBase + intervalo. Ej.: ingresa a
+    // 4.000 con plan cada 5.000 → primer servicio a 9.000 (no a 5.000). Si por algún
+    // motivo aún no hay km base, caemos al km actual como ancla para no romper.
     if (item.intervaloKm && kmActual != null && kmActual > 0) {
-      resultado.kmRestantes = item.intervaloKm - (kmActual % item.intervaloKm);
+      const ancla = kmBase != null ? kmBase : kmActual;
+      const proximoKm = ancla + item.intervaloKm;
+      resultado.proximoKm = proximoKm;
+      resultado.kmRestantes = proximoKm - kmActual;
       resultado.estimado = true;
-      if (resultado.kmRestantes <= (item.umbralAlertaKm || 500)) {
+      if (resultado.kmRestantes <= 0) resultado.estado = "VENCIDO";
+      else if (resultado.kmRestantes <= (item.umbralAlertaKm || 500))
         resultado.estado = "PROXIMO";
-      }
     }
     return resultado;
   }
@@ -91,6 +120,7 @@ function evaluarItem(item, ultimaOT, kmActual, hoy) {
   // Evaluación por kilometraje
   if (item.intervaloKm && kmActual != null && ultimaOT.kilometraje != null) {
     const proximoKm = ultimaOT.kilometraje + item.intervaloKm;
+    resultado.proximoKm = proximoKm;
     resultado.kmRestantes = proximoKm - kmActual;
     if (resultado.kmRestantes <= 0) vencido = true;
     else if (resultado.kmRestantes <= (item.umbralAlertaKm || 500))
@@ -175,6 +205,30 @@ async function calcularAlertas(opts = {}) {
       }
       const kmActual = kmCache.get(vId);
 
+      // Km base (ancla del primer mantenimiento sin historial). Se toma una sola
+      // vez por vehículo: la primera vez que se evalúa y hay km válido. Idempotente
+      // (solo escribe si aún está en null) para no correr la meta en cada consulta.
+      let kmBase = vehiculo.kilometrajeBaseMantenimiento;
+      if (kmBase == null && kmActual != null && kmActual > 0) {
+        kmBase = kmActual;
+        vehiculo.kilometrajeBaseMantenimiento = kmBase;
+        try {
+          await Vehiculo.updateOne(
+            { _id: vehiculo._id, kilometrajeBaseMantenimiento: null },
+            {
+              $set: {
+                kilometrajeBaseMantenimiento: kmBase,
+                fechaBaseMantenimiento: new Date(),
+              },
+            },
+          );
+        } catch (e) {
+          logger.error(
+            `[AlertasMant] No se pudo fijar km base ${vehiculo.placa}: ${e.message}`,
+          );
+        }
+      }
+
       for (const item of plan.items) {
         // Última OT cerrada de este ítem para este vehículo
         const ultimaOT = await OrdenTrabajo.findOne({
@@ -192,7 +246,7 @@ async function calcularAlertas(opts = {}) {
           .select("numero fechaCierre kilometraje")
           .lean();
 
-        const evaluacion = evaluarItem(item, ultimaOT, kmActual, hoy);
+        const evaluacion = evaluarItem(item, ultimaOT, kmActual, hoy, kmBase);
 
         if (soloAccionables && evaluacion.estado === "OK") continue;
 

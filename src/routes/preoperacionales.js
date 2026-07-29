@@ -77,6 +77,15 @@ router.put(
   preoperacionalController.validarCorreccion,
 );
 
+// Aprobar la preoperacional "de todos modos" (ADMIN/CLIENTE_ADMIN):
+// resuelve novedades no corregibles y fuerza el estado a APROBADO.
+router.put(
+  "/:id/aprobar-forzado",
+  authenticate,
+  checkRole(["ADMIN", "CLIENTE_ADMIN"]),
+  preoperacionalController.aprobarForzado,
+);
+
 // Rechazar corrección de una novedad (ADMIN/CLIENTE_ADMIN)
 router.put(
   "/:id/novedades/:novedadId/rechazar",

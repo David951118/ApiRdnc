@@ -27,6 +27,15 @@ const userSessionSchema = new mongoose.Schema(
       required: true,
     },
 
+    // Expiración del token de Cellvi (decodificada de su JWT al hacer login).
+    // Sirve para diagnosticar 401 intermitentes: si Cellvi vence su token antes
+    // que nuestra sesión, las llamadas que dependen de Cellvi fallarán aunque la
+    // sesión de la plataforma siga viva. null si el token no es un JWT decodificable.
+    cellviTokenExpiresAt: {
+      type: Date,
+      default: null,
+    },
+
     // Información del usuario de Cellvi
     userData: {
       userId: String,

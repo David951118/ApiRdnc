@@ -1,4 +1,5 @@
 const Tercero = require("../models/Tercero");
+const UserSession = require("../models/UserSession");
 const ContratoFuec = require("../models/ContratoFUEC");
 const { deleteDocumentosWithS3, cleanEntidadesAsociadas } = require("../helpers/cascadeDelete");
 const s3Service = require("../services/s3Service");
@@ -175,6 +176,7 @@ exports.getAll = async (req, res) => {
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const terceros = await Tercero.find(query)
+      .sort({ createdAt: -1 }) // más recientes primero: lo recién creado se ve arriba
       .limit(parseInt(limit))
       .skip(skip)
       .lean();
@@ -337,8 +339,43 @@ exports.update = async (req, res) => {
       }
     }
 
+    // Snapshot de acceso ANTES de aplicar cambios, para saber si hay que
+    // invalidar sesiones activas (los roles se resuelven en el login y quedan
+    // "pegados" en la sesión; sin invalidar, un cambio de rol no aplica hasta
+    // que el usuario cierre sesión).
+    const accesoAntes = JSON.stringify({
+      roles: tercero.roles || [],
+      rolesSistema: tercero.rolesSistema || [],
+      usuarioCellvi: tercero.usuarioCellvi || null,
+    });
+
     Object.assign(tercero, req.body);
     await tercero.save();
+
+    const accesoDespues = JSON.stringify({
+      roles: tercero.roles || [],
+      rolesSistema: tercero.rolesSistema || [],
+      usuarioCellvi: tercero.usuarioCellvi || null,
+    });
+
+    if (accesoAntes !== accesoDespues) {
+      // Invalidar sesiones activas del usuario (por su usuario Cellvi, antes y
+      // después por si cambió) para forzar re-login con los roles nuevos.
+      const usuarios = [
+        ...new Set(
+          [JSON.parse(accesoAntes).usuarioCellvi, tercero.usuarioCellvi].filter(
+            Boolean,
+          ),
+        ),
+      ];
+      if (usuarios.length > 0) {
+        const r = await UserSession.deleteMany({ username: { $in: usuarios } });
+        logger.info(
+          `Acceso de tercero ${tercero._id} modificado: ${r.deletedCount} sesión(es) invalidada(s) para ${usuarios.join(", ")}`,
+        );
+      }
+    }
+
     res.json({ success: true, data: tercero });
   } catch (error) {
     logger.error(`Error actualizando tercero: ${error.message}`);

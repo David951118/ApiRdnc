@@ -14,9 +14,20 @@ class AuthService {
   constructor() {
     this.cellviApiUrl = config.cellvi.apiUrl;
     // Secret para firmar JWTs (usar variable de entorno en producción)
-    this.jwtSecret =
-      process.env.JWT_SECRET || "CHANGE_THIS_SECRET_IN_PRODUCTION";
-    this.sessionDuration = 30; // minutos
+    this.jwtSecret = config.auth.jwtSecret;
+    this.sessionDuration = config.auth.sessionDurationMin; // minutos
+
+    // Aviso de despliegue: si el secret quedó en el valor por defecto, los tokens
+    // son inseguros y —más importante para el 401 intermitente— si el secret difiere
+    // entre instancias/reinicios, los tokens firmados por una instancia son
+    // rechazados por otra. Dejar constancia en logs para diagnosticar producción.
+    if (this.jwtSecret === "CHANGE_THIS_SECRET_IN_PRODUCTION") {
+      logger.warn(
+        "[Auth] JWT_SECRET no está configurado: usando valor por defecto. " +
+          "Configúralo en .env (idéntico en todas las instancias) para evitar " +
+          "sesiones inválidas intermitentes.",
+      );
+    }
   }
 
   /**
@@ -44,6 +55,19 @@ class AuthService {
 
       if (!cellviToken) {
         throw new Error("No se recibió token de Cellvi");
+      }
+
+      // Decodificar (sin verificar firma) la expiración del token de Cellvi para
+      // diagnosticar 401 intermitentes. Si Cellvi lo vence antes que nuestra sesión,
+      // las llamadas dependientes de Cellvi fallarán aunque la sesión siga viva.
+      let cellviTokenExpiresAt = null;
+      try {
+        const decodedCellvi = jwt.decode(cellviToken);
+        if (decodedCellvi && decodedCellvi.exp) {
+          cellviTokenExpiresAt = new Date(decodedCellvi.exp * 1000);
+        }
+      } catch (e) {
+        logger.warn(`[Auth] No se pudo decodificar token Cellvi: ${e.message}`);
       }
 
       // 2. Obtener información del usuario
@@ -91,6 +115,17 @@ class AuthService {
       // 5. Crear token JWT propio del API RNDC
       const expiresAt = new Date(Date.now() + this.sessionDuration * 60 * 1000);
 
+      // Diagnóstico: avisar si el token de Cellvi vence ANTES que nuestra sesión.
+      // Esto explicaría "token inválido" intermitente atribuible a Cellvi.
+      if (cellviTokenExpiresAt && cellviTokenExpiresAt < expiresAt) {
+        const minCellvi = Math.round((cellviTokenExpiresAt - Date.now()) / 60000);
+        logger.warn(
+          `[Auth] Token Cellvi de ${username} vence en ~${minCellvi} min ` +
+            `(antes que la sesión de ${this.sessionDuration} min). Las llamadas a ` +
+            `Cellvi pueden fallar con 401 aunque la sesión siga activa.`,
+        );
+      }
+
       const payload = {
         username: username,
         userId: userInfo.userId,
@@ -111,6 +146,7 @@ class AuthService {
         username,
         tokenHash,
         cellviToken,
+        cellviTokenExpiresAt,
         userData: {
           userId: userInfo.userId,
           username: username,
@@ -236,6 +272,12 @@ class AuthService {
         roles: response.data.roles || [],
       };
     } catch (error) {
+      // No silenciar: registrar el error real de Cellvi (status/mensaje) para
+      // poder distinguir un problema de Cellvi de uno de la plataforma.
+      const status = error.response?.status;
+      logger.warn(
+        `[Auth] _getUserInfo falló contra Cellvi${status ? ` (HTTP ${status})` : ""}: ${error.message}`,
+      );
       return { userId: null, email: null, roles: [] };
     }
   }
@@ -253,6 +295,12 @@ class AuthService {
       );
       return response.data || [];
     } catch (error) {
+      // No silenciar: un 401 aquí indica token de Cellvi rechazado (posible causa
+      // del "token inválido" que se atribuye a Cellvi).
+      const status = error.response?.status;
+      logger.warn(
+        `[Auth] _getVehiculosUsuario falló contra Cellvi${status ? ` (HTTP ${status})` : ""}: ${error.message}`,
+      );
       return [];
     }
   }

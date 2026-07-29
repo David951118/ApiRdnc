@@ -62,6 +62,13 @@ const VehiculoSchema = new Schema(
       enum: ["CELLVI_GPS", "PREOPERACIONAL", "MANUAL"],
       default: null,
     },
+    // Km de referencia para el PRIMER mantenimiento cuando aún no hay OT cerrada.
+    // Se toma una "foto" del km actual la primera vez que el vehículo se evalúa
+    // contra un plan, para que el primer servicio programado sea kmBase + intervalo
+    // (p. ej. vehículo que ingresa a 4.000 km con plan cada 5.000 → primer servicio
+    // a 9.000). Sin esta ancla, la meta se movería con el odómetro y nunca vencería.
+    kilometrajeBaseMantenimiento: { type: Number, default: null },
+    fechaBaseMantenimiento: { type: Date, default: null },
 
     // Historial de Mantenimientos (Resumen)
     mantenimientos: [

@@ -14,12 +14,19 @@ const logger = require("../config/logger");
  * El odómetro GPS depende del protocolo de cada equipo:
  *   - iStartek:   clave "Odometro", valor EN METROS (ej: 7656570 ≈ 7656 km)
  *   - Skypatrol:  clave "kilometraje" u "odometro_km"
+ *   - Otros equipos: clave "RECORRIDOS", valor EN KILÓMETROS con decimales
+ *                    (ej: "32594.471" ≈ 32594 km)
  *   - Equipos sin odómetro configurado reportan 0 → se descarta y se usa fallback.
  */
 
 // Claves posibles del odómetro dentro de "variables", normalizadas
-// (minúsculas, sin guiones/underscores)
-const ODOMETRO_KEYS = ["odometro", "kilometraje", "odometrokm"];
+// (minúsculas, sin guiones/underscores). Distintos equipos usan distinto nombre.
+const ODOMETRO_KEYS = [
+  "odometro",
+  "kilometraje",
+  "odometrokm",
+  "recorridos", // equipos que envían el km recorrido total (km con decimales)
+];
 
 // Valores crudos >= a este umbral se asumen en metros (ningún vehículo de la
 // flota supera 1.000.000 km; un equipo que reporta metros lo supera con 1.000 km)
@@ -52,7 +59,9 @@ function extraerOdometro(variables) {
   for (const key of Object.keys(vars)) {
     const normalizada = key.toLowerCase().replace(/[-_\s]/g, "");
     if (ODOMETRO_KEYS.includes(normalizada)) {
-      const raw = Number(vars[key]);
+      // Algunos equipos envían el valor como string con coma decimal
+      // (ej. "32594,471"); normalizamos a punto antes de convertir.
+      const raw = Number(String(vars[key]).trim().replace(",", "."));
       if (!Number.isFinite(raw) || raw <= 0) return null;
 
       const esMetros = raw >= UMBRAL_METROS;

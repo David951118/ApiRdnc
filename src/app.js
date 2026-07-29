@@ -78,6 +78,7 @@ connectDB().then(() => {
   require("./workers/vencerNovedadesPreop");
   require("./workers/alertasMantenimiento");
   require("./workers/reporteGerencial");
+  require("./workers/purgarArchivosVencidos");
 
   logger.info("Workers initialized successfully");
 });
