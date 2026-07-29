@@ -1,47 +1,52 @@
 #!/bin/bash
 # ============================================================================
 # Backup de MongoDB (apirndc) — Rocky Linux / servidor físico
+# CONFIGURADO para el server de producción (2026-07-29):
+#   - Base real: cellvi-rndc (Mongo local con autenticación)
+#   - El URI (con credenciales) se lee del .env del backend en runtime,
+#     así la contraseña NO queda duplicada en este script.
+#   - Respaldos en /home/cellvi2.0/BDMONGO/AAAA/MM/DD/ (misma convención que
+#     el backup de PostgreSQL en /home/cellvi2.0/BD_CELLVI).
 #
-# Estrategia (misma que el backup de PostgreSQL de CELLVI):
-#   - Dump diario comprimido (mongodump --gzip --archive)
-#   - Se guarda en una carpeta con árbol de fecha que se crea SOLA:
-#       $BACKUP_BASE/AAAA/MM/DD/     (ej: /home/cellvi20/BDMONGO/2026/07/24/)
-#   - Retención: borra backups con más de RETENCION_DIAS días y limpia
-#     las carpetas de fecha que queden vacías.
-#   - Opcional: copia a S3 para redundancia fuera del servidor.
-#
-# Instalación (una sola vez en el servidor):
-#   1. Requiere mongodb-database-tools (mongodump viene ahí):
-#        sudo dnf install -y mongodb-database-tools
-#   2. Copiar este script y darle permisos:
-#        sudo cp backup-mongodb.sh /root/
-#        sudo chmod 700 /root/backup-mongodb.sh
-#   3. Ajustar DB_NAME y (si aplica) MONGO_URI con credenciales.
-#   4. Programar en crontab (diario 1:30 AM):
-#        sudo vim /etc/crontab
-#        30 1 * * * root /root/backup-mongodb.sh >> /var/log/mongodb-backup.log 2>&1
+# Programado en /etc/crontab (diario 1:30 AM):
+#   30 1 * * * root /root/backup-mongodb.sh >> /var/log/mongodb-backup.log 2>&1
 #
 # Restaurar un backup:
-#   mongorestore --uri "$MONGO_URI" --gzip --archive=/home/cellvi20/BDMONGO/AAAA/MM/DD/ARCHIVO.archive.gz --drop
+#   MONGO_URI=$(grep -E '^MONGODB_URI=' /var/www/html/Apirndc/.env | cut -d= -f2-)
+#   mongorestore --uri "$MONGO_URI" --gzip --archive=/home/cellvi2.0/BDMONGO/AAAA/MM/DD/ARCHIVO.archive.gz --drop
 # ============================================================================
 
 set -euo pipefail
 
 # ----------------------------- CONFIGURACIÓN -------------------------------
-DB_NAME="cellvi-rndc"          # <-- AJUSTAR al nombre real de la base en prod
+DB_NAME="cellvi-rndc"
 
-# Sin autenticación:
-MONGO_URI="mongodb://localhost:27017"
-# Con autenticación (descomentar y ajustar; mejor aún: usar variable de entorno):
-# MONGO_URI="mongodb://rndc_admin:PASSWORD@localhost:27017/?authSource=admin"
+# El URI real (con credenciales) vive en el .env del backend. Se le quita el
+# nombre de la base del path porque mongodump no acepta URI-con-base + --db.
+ENV_FILE="/var/www/html/Apirndc/.env"
+# tr -d '\r': el .env de prod tiene finales de línea CRLF (Windows)
+MONGO_URI=$(grep -E '^MONGODB_URI=' "$ENV_FILE" | head -1 | tr -d '\r' | cut -d= -f2- | sed -E 's#(://[^/]+)/[^?]*#\1/#')
+
+if [ -z "$MONGO_URI" ]; then
+  echo "[$(date '+%F %T')] ERROR: no se pudo leer MONGODB_URI de $ENV_FILE" >&2
+  exit 1
+fi
+
+# El usuario de Mongo solo tiene credencial SCRAM-SHA-256 y mongodump negocia
+# SHA-1 por defecto contra este mongod → hay que forzar el mecanismo.
+case "$MONGO_URI" in
+  *authMechanism=*) : ;;
+  *\?*) MONGO_URI="${MONGO_URI}&authMechanism=SCRAM-SHA-256" ;;
+  *)    MONGO_URI="${MONGO_URI}?authMechanism=SCRAM-SHA-256" ;;
+esac
 
 # Base en home; las subcarpetas AAAA/MM/DD se crean solas (igual que el backup de Postgres).
-BACKUP_BASE="/home/cellvi20/BDMONGO"
+BACKUP_BASE="/home/cellvi2.0/BDMONGO"
 RETENCION_DIAS=60              # borra backups con más de N días
 
-# Dueño de los archivos/carpetas creados (para que queden bajo el usuario, no root).
-# Dejar vacío para no cambiar el propietario.
-BACKUP_OWNER="cellvi20"
+# Vacío: los archivos quedan de root, igual que /home/cellvi2.0/BD_CELLVI
+# (la cuenta "cellvi2.0" no existe como usuario del sistema).
+BACKUP_OWNER=""
 
 # Redundancia fuera del servidor (opcional). Dejar vacío para desactivar.
 # Requiere AWS CLI configurado (aws configure) con permiso s3:PutObject.
