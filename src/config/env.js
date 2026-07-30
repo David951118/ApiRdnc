@@ -27,7 +27,12 @@ module.exports = {
     endpoint:
       process.env.SOAP_ENDPOINT_URL ||
       "http://rndcws.mintransporte.gov.co:8080/soap/IBPMServices",
+    // Ambiente de pruebas oficial del RNDC (bd copia de producción)
+    endpointPruebas:
+      process.env.SOAP_ENDPOINT_URL_PRUEBAS ||
+      "http://plc.mintransporte.gov.co:8080/soap/IBPMServices",
     requestTimeout: parseInt(process.env.SOAP_REQUEST_TIMEOUT || "60000"),
+    nitGps: process.env.RNDC_NIT_GPS || "",
   },
 
   // Cellvi API

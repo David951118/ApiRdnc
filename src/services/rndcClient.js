@@ -376,6 +376,103 @@ class RNDCClient {
     }
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // EXPEDICIÓN (rol EMPRESA DE TRANSPORTE — requiere credencial de la
+  // empresa cliente, no la del usuario GPS)
+  // ══════════════════════════════════════════════════════════════════
+
+  /**
+   * Envío genérico de un proceso RNDC (tipo 1 = registrar, 3 = consultar).
+   * @param {string} logTipo - etiqueta para RNDCLog
+   * @param {number} tipo - tipo de solicitud RNDC
+   * @param {number} procesoid - proceso del RNDC
+   * @param {string} variablesXML - subelementos de <variables>
+   * @param {string} documentoXML - subelementos de <documento> (consultas)
+   * @param {Object} metadata - metadatos para el log
+   */
+  async enviarProceso(
+    logTipo,
+    tipo,
+    procesoid,
+    variablesXML = "",
+    documentoXML = "",
+    metadata = {},
+  ) {
+    const innerXML = this._buildRNDCXML(tipo, procesoid, variablesXML, documentoXML);
+    const soapXML = this._buildSOAPEnvelope(innerXML);
+    const start = Date.now();
+
+    try {
+      logger.info(`RNDC ${logTipo}: tipo ${tipo} / proceso ${procesoid}`);
+      const response = await this.axiosInstance.post(this.endpoint, soapXML, {
+        timeout: this.axiosInstance.defaults.timeout,
+      });
+      const parsed = await this._parseResponse(response.data);
+      await this._logInteraction(logTipo, soapXML, start, parsed, null, metadata);
+      return parsed;
+    } catch (error) {
+      logger.error(`Error RNDC ${logTipo}: ${error.message}`);
+      await this._logInteraction(logTipo, soapXML, start, null, error, metadata);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /** Proceso 11 — Crear o actualizar Tercero (conductor, titular, remitente...) */
+  async registrarTercero(variablesXML, metadata = {}) {
+    return this.enviarProceso("exp_tercero", 1, 11, variablesXML, "", metadata);
+  }
+
+  /** Proceso 12 — Crear o actualizar Vehículo */
+  async registrarVehiculo(variablesXML, metadata = {}) {
+    return this.enviarProceso("exp_vehiculo", 1, 12, variablesXML, "", metadata);
+  }
+
+  /** Proceso 3 — Expedir Remesa Terrestre de Carga */
+  async expedirRemesa(variablesXML, metadata = {}) {
+    return this.enviarProceso("exp_remesa", 1, 3, variablesXML, "", metadata);
+  }
+
+  /** Proceso 4 — Expedir Manifiesto de Carga */
+  async expedirManifiesto(variablesXML, metadata = {}) {
+    return this.enviarProceso("exp_manifiesto", 1, 4, variablesXML, "", metadata);
+  }
+
+  /** Proceso 9 — Anular Remesa Terrestre de Carga */
+  async anularRemesa(variablesXML, metadata = {}) {
+    return this.enviarProceso("exp_anular_remesa", 1, 9, variablesXML, "", metadata);
+  }
+
+  /** Proceso 32 — Anular Manifiesto de Carga */
+  async anularManifiesto(variablesXML, metadata = {}) {
+    return this.enviarProceso("exp_anular_manifiesto", 1, 32, variablesXML, "", metadata);
+  }
+
+  /** Proceso 5 — Cumplir Remesa Terrestre de Carga */
+  async cumplirRemesa(variablesXML, metadata = {}) {
+    return this.enviarProceso("exp_cumplir_remesa", 1, 5, variablesXML, "", metadata);
+  }
+
+  /** Proceso 6 — Cumplir Manifiesto de Carga */
+  async cumplirManifiesto(variablesXML, metadata = {}) {
+    return this.enviarProceso("exp_cumplir_manifiesto", 1, 6, variablesXML, "", metadata);
+  }
+
+  /**
+   * Proceso 73 (tipo 3) — Consultar aceptación electrónica de manifiestos.
+   * @param {string} camposCSV - columnas a devolver
+   * @param {string} documentoXML - filtros del documento
+   */
+  async consultarAceptacionManifiesto(camposCSV, documentoXML, metadata = {}) {
+    return this.enviarProceso(
+      "exp_consulta_aceptacion",
+      3,
+      73,
+      camposCSV,
+      documentoXML,
+      metadata,
+    );
+  }
+
   /**
    * Parse SOAP Response
    */
