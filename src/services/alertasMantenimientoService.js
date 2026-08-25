@@ -51,6 +51,28 @@ async function vehiculosDelPlan(plan) {
 }
 
 /**
+ * Próximo hito de mantenimiento a partir de un ancla (último servicio o km base
+ * de ingreso al plan) avanzando de intervalo en intervalo hasta superar el km
+ * actual del vehículo.
+ *
+ * Ej.: vehículo en 10.500 con plan cada 5.000 → 15.500.
+ * Ej.: ancla 541.414, intervalo 5.000, vehículo ya en 636.094 → 641.414, con
+ * 19 ciclos vencidos (antes se mostraba 546.414, un hito del pasado).
+ */
+function calcularProximoHito(ancla, intervalo, kmActual) {
+  if (!intervalo || intervalo <= 0) return null;
+  if (kmActual == null) {
+    return { proximoKm: ancla + intervalo, ciclosVencidos: 0 };
+  }
+  const avance = kmActual - ancla;
+  const ciclos = avance <= 0 ? 1 : Math.ceil(avance / intervalo) || 1;
+  const proximoKm = ancla + ciclos * intervalo;
+  // Ciclos que ya deberían haberse hecho y no se hicieron
+  const ciclosVencidos = Math.max(0, Math.floor(avance / intervalo));
+  return { proximoKm, ciclosVencidos };
+}
+
+/**
  * Evalúa un ítem del plan para un vehículo.
  * @param {number|null} kmBase - km de referencia del vehículo (kilometrajeBaseMantenimiento)
  *        usado como ancla del primer servicio cuando aún no hay OT cerrada.
@@ -104,11 +126,15 @@ function evaluarItem(item, ultimaOT, kmActual, hoy, kmBase = null) {
     // motivo aún no hay km base, caemos al km actual como ancla para no romper.
     if (item.intervaloKm && kmActual != null && kmActual > 0) {
       const ancla = kmBase != null ? kmBase : kmActual;
-      const proximoKm = ancla + item.intervaloKm;
-      resultado.proximoKm = proximoKm;
-      resultado.kmRestantes = proximoKm - kmActual;
+      const hito = calcularProximoHito(ancla, item.intervaloKm, kmActual);
+      resultado.proximoKm = hito.proximoKm;
+      resultado.kmRestantes = hito.proximoKm - kmActual;
+      resultado.ciclosVencidos = hito.ciclosVencidos;
       resultado.estimado = true;
-      if (resultado.kmRestantes <= 0) resultado.estado = "VENCIDO";
+      // Con ciclos perdidos el mantenimiento está atrasado aunque el siguiente
+      // hito todavía quede adelante.
+      if (hito.ciclosVencidos > 0) resultado.estado = "VENCIDO";
+      else if (resultado.kmRestantes <= 0) resultado.estado = "VENCIDO";
       else if (resultado.kmRestantes <= (item.umbralAlertaKm || 500))
         resultado.estado = "PROXIMO";
     }
@@ -120,10 +146,16 @@ function evaluarItem(item, ultimaOT, kmActual, hoy, kmBase = null) {
 
   // Evaluación por kilometraje
   if (item.intervaloKm && kmActual != null && ultimaOT.kilometraje != null) {
-    const proximoKm = ultimaOT.kilometraje + item.intervaloKm;
-    resultado.proximoKm = proximoKm;
-    resultado.kmRestantes = proximoKm - kmActual;
-    if (resultado.kmRestantes <= 0) vencido = true;
+    const hito = calcularProximoHito(
+      ultimaOT.kilometraje,
+      item.intervaloKm,
+      kmActual,
+    );
+    resultado.proximoKm = hito.proximoKm;
+    resultado.kmRestantes = hito.proximoKm - kmActual;
+    resultado.ciclosVencidos = hito.ciclosVencidos;
+    if (hito.ciclosVencidos > 0) vencido = true;
+    else if (resultado.kmRestantes <= 0) vencido = true;
     else if (resultado.kmRestantes <= (item.umbralAlertaKm || 500))
       proximo = true;
   }
