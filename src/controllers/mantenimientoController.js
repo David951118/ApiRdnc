@@ -476,16 +476,17 @@ exports.anularOrden = async (req, res) => {
 
 /**
  * DELETE /api/mantenimiento/ordenes/:id
- * Eliminar una orden de trabajo (soft delete). Exclusivo de ADMIN/SUPER_ADMIN:
- * el CLIENTE_ADMIN solo puede anular, porque la anulación deja la orden a la
- * vista con su historial y el borrado la retira del módulo.
+ * Eliminar una orden de trabajo. Disponible para ADMIN/SUPER_ADMIN y para el
+ * CLIENTE_ADMIN dentro de su empresa (scopeEmpresa). A diferencia de anular
+ * —que deja la orden a la vista con su historial—, esto la retira del módulo
+ * y no se puede deshacer desde la plataforma.
  */
 exports.eliminarOrden = async (req, res) => {
   try {
-    const ot = await OrdenTrabajo.findOne({
-      _id: req.params.id,
-      deletedAt: null,
-    });
+    // scopeEmpresa: el CLIENTE_ADMIN solo alcanza las OTs de su propia empresa.
+    const ot = await OrdenTrabajo.findOne(
+      scopeEmpresa(req, { _id: req.params.id, deletedAt: null }),
+    );
     if (!ot)
       return res
         .status(404)
