@@ -101,6 +101,14 @@ router.post(
   preoperacionalController.comentarNovedad,
 );
 
+// Anexar evidencia (foto y/o nota) a la corrección de una novedad.
+// Funciona en cualquier estado, incluida una corrección ya VALIDADA.
+router.post(
+  "/:id/novedades/:novedadId/evidencias",
+  authenticate,
+  preoperacionalController.agregarEvidenciaCorreccion,
+);
+
 // Extender plazo de corrección de una novedad (ADMIN/CLIENTE_ADMIN)
 router.put(
   "/:id/novedades/:novedadId/extender",

@@ -17,6 +17,24 @@ const ItemRevisionSchema = new Schema(
 );
 
 /**
+ * Evidencia de corrección: cada foto (con su nota opcional) que se anexa a una
+ * novedad. Se pueden seguir agregando aunque la corrección ya esté VALIDADA,
+ * para dejar registro del seguimiento posterior al arreglo.
+ */
+const EvidenciaCorreccionSchema = new Schema(
+  {
+    url: { type: String, required: true },
+    key: String, // S3 key
+    nota: String, // anotación que acompaña a la foto
+    fecha: { type: Date, default: Date.now },
+    autor: String, // userId
+    autorNombre: String,
+    rol: String,
+  },
+  { _id: true },
+);
+
+/**
  * Anotación: Comentario de texto accesible por todos los roles con acceso al vehículo.
  * Tipos:
  *   GENERAL     → comentario libre del usuario
@@ -40,7 +58,10 @@ const AnotacionSchema = new Schema(
     novedadOrigenId: Schema.Types.ObjectId,
     itemOrigen: String, // Ej: "seccionDelantera.frenos"
     fotoFalla: String, // URL preservada de la foto de falla original
-    fotoCorreccion: String, // URL preservada de la foto de corrección
+    fotoCorreccion: String, // URL preservada de la foto de corrección (la principal)
+    // Todas las fotos de corrección anexadas a la novedad (incluidas las que se
+    // agregan después de validada). La primera es la de `fotoCorreccion`.
+    fotos: [String],
   },
   { _id: true, timestamps: true },
 );
@@ -52,6 +73,7 @@ const HistorialAccionSchema = new Schema(
       enum: [
         "CREADA",
         "CORRECCION_SUBIDA",
+        "EVIDENCIA_AGREGADA", // foto/nota anexada a la corrección (incluso ya validada)
         "VALIDADA",
         "RECHAZADA",
         "PLAZO_EXTENDIDO",
@@ -77,8 +99,11 @@ const NovedadSchema = new Schema(
     descripcion: String,
     fotoFalla: String,
     fotoFallaKey: String, // S3 key para poder eliminar al validar
-    fotoCorreccion: String,
+    fotoCorreccion: String, // primera foto de corrección (compatibilidad)
     fotoCorreccionKey: String, // S3 key opcional
+    // Todas las evidencias de la corrección: se pueden seguir anexando fotos y
+    // notas incluso después de que la corrección fue VALIDADA.
+    evidenciasCorreccion: [EvidenciaCorreccionSchema],
     fechaLimite: { type: Date, required: true },
     requiereCorreccion: { type: Boolean, default: true }, // false para SUENO (no se puede corregir)
 

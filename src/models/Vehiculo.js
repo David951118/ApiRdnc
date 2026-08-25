@@ -8,7 +8,10 @@ const { Schema } = mongoose;
 const VehiculoSchema = new Schema(
   {
     placa: { type: String, unique: true, required: true, uppercase: true }, // ID Principal
-    numeroInterno: { type: String, unique: true, required: true },
+    // Rótulo interno de la empresa. NO es identificador: puede repetirse entre
+    // empresas (e incluso dentro de una) y puede quedar vacío. El índice único
+    // global que existía se eliminó de la base de datos.
+    numeroInterno: { type: String, default: "" },
     marca: { type: String, required: true }, // viene de cellvi
     linea: { type: String, required: true }, // viene de cellvi
     modelo: { type: Number, required: true }, // viene de cellvi

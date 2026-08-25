@@ -5,6 +5,7 @@ const Tercero = require("../models/Tercero");
 const Documento = require("../models/Documento");
 const s3Service = require("../services/s3Service");
 const logger = require("../config/logger");
+const { labelItemPreop } = require("../utils/preopLabels");
 
 /**
  * Scope de preoperacionales según rol:
@@ -855,6 +856,17 @@ exports.resolverNovedad = async (req, res) => {
 
     // Subir corrección → pasa a EN_REVISION (espera validación del admin)
     novedad.fotoCorreccion = fotoCorreccion;
+    // La foto también entra al listado de evidencias, que es lo que permite
+    // seguir anexando más adelante (ver agregarEvidenciaCorreccion).
+    novedad.evidenciasCorreccion.push({
+      url: fotoCorreccion,
+      key: req.body.fotoCorreccionKey || null,
+      nota: req.body.nota || null,
+      fecha: new Date(),
+      autor: req.user?.userId || null,
+      autorNombre: req.user?.username || null,
+      rol: (req.user?.roles || [])[0]?.replace("ROLE_", "") || null,
+    });
     novedad.estadoCorreccion = "EN_REVISION";
     novedad.fechaResolucion = new Date();
     novedad.resueltaPor = userId;
@@ -1331,7 +1343,12 @@ exports.getEstadisticas = async (req, res) => {
       success: true,
       data: {
         resumen: { total, aprobadas, conNovedad, rechazadas },
-        fallosPorItem,
+        // itemLabel: nombre legible ("aseoInterno" → "Aseo Interno") para que
+        // cualquier consumidor lo muestre sin tener que traducir la clave.
+        fallosPorItem: fallosPorItem.map((f) => ({
+          ...f,
+          itemLabel: labelItemPreop(f.item),
+        })),
         porMes,
         sueno: {
           totalNovedadesSueno: novedadesSueno,
@@ -1419,7 +1436,7 @@ exports.historialCorrecciones = async (req, res) => {
     }
 
     const fallosComunes = Object.entries(conteoItems)
-      .map(([item, data]) => ({ item, ...data }))
+      .map(([item, data]) => ({ item, itemLabel: labelItemPreop(item), ...data }))
       .sort((a, b) => b.total - a.total);
 
     res.json({
@@ -1496,7 +1513,7 @@ exports.validarCorreccion = async (req, res) => {
     preop.anotaciones.push({
       texto:
         observaciones ||
-        `Corrección validada para ${novedad.item}. Se preservan fotos de antes y después.`,
+        `Corrección validada para ${labelItemPreop(novedad.item)}. Se preservan fotos de antes y después.`,
       tipo: "VALIDACION",
       autor: userId,
       autorNombre: req.user?.username || null,
@@ -1506,6 +1523,10 @@ exports.validarCorreccion = async (req, res) => {
       itemOrigen: novedad.item,
       fotoFalla: fotoFallaOriginal,
       fotoCorreccion: fotoCorreccionOriginal,
+      // Se preservan TODAS las fotos de corrección, no solo la principal.
+      fotos: (novedad.evidenciasCorreccion || [])
+        .map((e) => e.url)
+        .filter(Boolean),
     });
 
     // Borrar foto de falla de S3 (ya está preservada en la anotación)
@@ -1709,6 +1730,117 @@ exports.rechazarCorreccion = async (req, res) => {
  * POST /api/preoperacionales/:id/novedades/:novedadId/comentar
  * Body: { comentario: "..." }
  */
+/**
+ * Anexar evidencia (foto y/o nota) a la corrección de una novedad.
+ * POST /api/preoperacionales/:id/novedades/:novedadId/evidencias
+ * Body: { fotoUrl?: "...", fotoKey?: "...", nota?: "..." }  (al menos uno)
+ *
+ * A diferencia de `resolverNovedad`, no cambia el estado de la corrección: se
+ * puede usar en cualquier momento —incluida una novedad ya VALIDADA— para
+ * seguir documentando el arreglo con varias fotos y varias anotaciones.
+ */
+exports.agregarEvidenciaCorreccion = async (req, res) => {
+  try {
+    const { id, novedadId } = req.params;
+    const { fotoUrl, fotoKey, nota } = req.body;
+
+    if (!fotoUrl && (!nota || nota.trim().length < 2)) {
+      return res.status(400).json({
+        success: false,
+        message: "Debe enviar una foto (fotoUrl) o una nota de al menos 2 caracteres",
+      });
+    }
+
+    const preop = await Preoperacional.findOne({ _id: id, deletedAt: null });
+    if (!preop) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Preoperacional no encontrada" });
+    }
+
+    const acceso = await tieneAccesoVehiculo(req, preop.vehiculo);
+    if (!acceso) {
+      return res.status(403).json({
+        success: false,
+        message: "No tiene acceso a esta preoperacional",
+      });
+    }
+
+    const novedad = preop.novedades.id(novedadId);
+    if (!novedad) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Novedad no encontrada" });
+    }
+
+    const userId = req.user?.userId || null;
+    const autorNombre = req.user?.username || null;
+    const rol = (req.user?.roles || [])[0]?.replace("ROLE_", "") || null;
+    const ahora = new Date();
+
+    novedad.evidenciasCorreccion.push({
+      url: fotoUrl || null,
+      key: fotoKey || null,
+      nota: nota ? nota.trim() : null,
+      fecha: ahora,
+      autor: userId,
+      autorNombre,
+      rol,
+    });
+
+    // Si aún no había foto principal (p. ej. la novedad se aprobó sin foto),
+    // la primera que llegue queda como la de referencia.
+    if (fotoUrl && !novedad.fotoCorreccion) {
+      novedad.fotoCorreccion = fotoUrl;
+      if (fotoKey) novedad.fotoCorreccionKey = fotoKey;
+    }
+
+    novedad.historial.push({
+      accion: "EVIDENCIA_AGREGADA",
+      usuario: userId,
+      fecha: ahora,
+      detalle: nota
+        ? `${fotoUrl ? "Foto y nota" : "Nota"} anexada: ${nota.trim()}`
+        : "Foto anexada a la corrección",
+    });
+
+    // Si la corrección ya estaba validada, la evidencia queda además como
+    // anotación de la preoperacional, que es donde el cliente hace seguimiento.
+    if (novedad.estadoCorreccion === "VALIDADA" && (nota || fotoUrl)) {
+      preop.anotaciones.push({
+        texto:
+          (nota && nota.trim()) ||
+          `Evidencia adicional de ${labelItemPreop(novedad.item)}.`,
+        tipo: "REVISION",
+        autor: userId,
+        autorNombre,
+        rol,
+        fecha: ahora,
+        novedadOrigenId: novedad._id,
+        itemOrigen: novedad.item,
+        fotoCorreccion: fotoUrl || null,
+        fotos: fotoUrl ? [fotoUrl] : [],
+      });
+    }
+
+    await preop.save({ validateBeforeSave: false });
+
+    res.status(201).json({
+      success: true,
+      message: "Evidencia anexada a la corrección",
+      data: {
+        novedadId,
+        estadoCorreccion: novedad.estadoCorreccion,
+        evidenciasCorreccion: novedad.evidenciasCorreccion,
+        historial: novedad.historial,
+      },
+    });
+  } catch (error) {
+    logger.error(`Error anexando evidencia de corrección: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 exports.comentarNovedad = async (req, res) => {
   try {
     const { id, novedadId } = req.params;
@@ -1793,6 +1925,7 @@ exports.getHistorial = async (req, res) => {
     const novedades = (preop.novedades || []).map((n) => ({
       _id: n._id,
       item: n.item,
+      itemLabel: labelItemPreop(n.item),
       tipo: n.tipo,
       descripcion: n.descripcion,
       estadoCorreccion: n.estadoCorreccion,
@@ -1801,6 +1934,7 @@ exports.getHistorial = async (req, res) => {
       fechaLimite: n.fechaLimite,
       fotoFalla: n.fotoFalla,
       fotoCorreccion: n.fotoCorreccion,
+      evidenciasCorreccion: n.evidenciasCorreccion || [],
       resueltaPor: n.resueltaPor,
       fechaResolucion: n.fechaResolucion,
       validadaPor: n.validadaPor,
@@ -1851,7 +1985,8 @@ exports.getHistorial = async (req, res) => {
 exports.crearAnotacion = async (req, res) => {
   try {
     const { id } = req.params;
-    const { texto, tipo, fotoFalla, fotoCorreccion, novedadOrigenId, itemOrigen } = req.body;
+    const { texto, tipo, fotoFalla, fotoCorreccion, fotos, novedadOrigenId, itemOrigen } =
+      req.body;
 
     if (!texto || texto.trim().length < 2) {
       return res.status(400).json({
@@ -1890,6 +2025,12 @@ exports.crearAnotacion = async (req, res) => {
       itemOrigen: itemOrigen || null,
       fotoFalla: fotoFalla || null,
       fotoCorreccion: fotoCorreccion || null,
+      // Varias fotos por anotación (además de la principal, por compatibilidad)
+      fotos: Array.isArray(fotos)
+        ? fotos.filter(Boolean)
+        : fotoCorreccion
+          ? [fotoCorreccion]
+          : [],
     };
 
     preop.anotaciones.push(anotacion);

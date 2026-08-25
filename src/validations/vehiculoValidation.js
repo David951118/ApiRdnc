@@ -3,7 +3,9 @@ const Joi = require("joi");
 const createVehiculo = Joi.object({
   // Identificación
   placa: Joi.string().required(),
-  numeroInterno: Joi.string().required(),
+  // Número interno: rótulo propio de cada empresa. Es libre (puede repetirse
+  // entre empresas e incluso dentro de una) y opcional.
+  numeroInterno: Joi.string().allow("", null).optional(),
   idCellvi: Joi.string()
     .required()
     .messages({
