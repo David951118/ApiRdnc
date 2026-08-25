@@ -190,13 +190,36 @@ exports.crearOrden = async (req, res) => {
 
 exports.listarOrdenes = async (req, res) => {
   try {
-    const { estado, tipo, vehiculo, mecanico, page = 1, limit = 25 } = req.query;
+    const {
+      estado,
+      tipo,
+      vehiculo,
+      mecanico,
+      search,
+      page = 1,
+      limit = 25,
+    } = req.query;
 
     const filtro = scopeEmpresa(req, { deletedAt: null });
     if (estado) filtro.estado = estado;
     if (tipo) filtro.tipo = tipo;
     if (vehiculo) filtro.vehiculo = vehiculo;
     if (mecanico) filtro.mecanico = mecanico;
+
+    // Búsqueda libre: número de OT, placa, descripción, taller o actividad.
+    // Se resuelve en la base para que alcance a todas las páginas.
+    if (search && String(search).trim()) {
+      const termino = String(search).trim();
+      const rx = new RegExp(termino.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      filtro.$or = [
+        { numero: rx },
+        { placa: rx },
+        { descripcion: rx },
+        { taller: rx },
+        { "actividades.descripcion": rx },
+        { planItemNombre: rx },
+      ];
+    }
 
     // El MECANICO ve todas las OTs de su empresa (scopeEmpresa ya acota el filtro);
     // puede seguir filtrando por mecánico con el query param.

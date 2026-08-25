@@ -3,6 +3,7 @@ const Tercero = require("../models/Tercero");
 const Documento = require("../models/Documento");
 const Preoperacional = require("../models/Preoperacional");
 const ContratoFuec = require("../models/ContratoFUEC");
+const OrdenTrabajo = require("../models/OrdenTrabajo");
 const { getVehicleScope } = require("../utils/dataScope");
 const { getVehiculoScope } = require("../services/vehiculoAccessService");
 const { deleteDocumentosWithS3, cleanEntidadesAsociadas } = require("../helpers/cascadeDelete");
@@ -286,7 +287,32 @@ exports.update = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Vehículo no encontrado" });
 
+    const kmAnterior = vehiculo.kilometrajeActual;
     Object.assign(vehiculo, req.body);
+
+    // Si corrigen el kilometraje y el vehículo todavía no tiene mantenimientos
+    // cerrados, la base de los planes se mueve con él: de lo contrario el
+    // primer servicio seguiría anclado al dato viejo (a menudo mal digitado).
+    if (
+      req.body.kilometrajeActual != null &&
+      req.body.kilometrajeActual !== kmAnterior
+    ) {
+      const tieneCierres = await OrdenTrabajo.exists({
+        vehiculo: vehiculo._id,
+        estado: "CERRADA",
+        deletedAt: null,
+      });
+      if (!tieneCierres) {
+        vehiculo.kilometrajeBaseMantenimiento = req.body.kilometrajeActual;
+        vehiculo.fechaBaseMantenimiento = new Date();
+        logger.info(
+          `Km base de mantenimiento de ${vehiculo.placa} reajustado a ${req.body.kilometrajeActual}`,
+        );
+      }
+      vehiculo.ultimaActualizacionKm = new Date();
+      vehiculo.fuenteKilometraje = "MANUAL";
+    }
+
     await vehiculo.save();
     res.json({ success: true, data: vehiculo });
   } catch (error) {

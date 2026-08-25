@@ -110,7 +110,11 @@ const createPreoperacional = Joi.object({
     }),
 
   fecha: Joi.date().optional(),
-  kilometraje: Joi.number().min(0).allow(null),
+  kilometraje: Joi.number().min(0).max(2000000).allow(null)
+    .messages({
+      "number.max":
+        "El kilometraje no parece real (máximo 2.000.000 km). Verifique el dato.",
+    }),
 
   seccionConductor,
   seccionDelantera,

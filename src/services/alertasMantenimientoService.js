@@ -2,6 +2,7 @@ const PlanMantenimiento = require("../models/PlanMantenimiento");
 const OrdenTrabajo = require("../models/OrdenTrabajo");
 const Vehiculo = require("../models/Vehiculo");
 const kilometrajeService = require("./kilometrajeService");
+const { esKmPlausible } = kilometrajeService;
 const logger = require("../config/logger");
 
 /**
@@ -209,6 +210,19 @@ async function calcularAlertas(opts = {}) {
       // vez por vehículo: la primera vez que se evalúa y hay km válido. Idempotente
       // (solo escribe si aún está en null) para no correr la meta en cada consulta.
       let kmBase = vehiculo.kilometrajeBaseMantenimiento;
+      // Una base fuera de rango (dato viejo mal digitado) se descarta: si se
+      // conserva, el primer mantenimiento queda programado a cientos de miles
+      // de km y la alerta nunca dispara.
+      if (kmBase != null && !esKmPlausible(kmBase)) {
+        logger.warn(
+          `[AlertasMant] Km base implausible en ${vehiculo.placa} (${kmBase}); se recalcula`,
+        );
+        kmBase = null;
+        await Vehiculo.updateOne(
+          { _id: vehiculo._id },
+          { $set: { kilometrajeBaseMantenimiento: null } },
+        ).catch(() => {});
+      }
       if (kmBase == null && kmActual != null && kmActual > 0) {
         kmBase = kmActual;
         vehiculo.kilometrajeBaseMantenimiento = kmBase;
@@ -270,4 +284,4 @@ async function calcularAlertas(opts = {}) {
   return alertas;
 }
 
-module.exports = { calcularAlertas };
+module.exports = { calcularAlertas, evaluarItem };

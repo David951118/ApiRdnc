@@ -50,7 +50,16 @@ const createVehiculo = Joi.object({
   fechaAfiliacion: Joi.date(),
 
   estado: Joi.string().valid("ACTIVO", "MANTENIMIENTO", "INACTIVO", "RETIRADO"),
-  kilometrajeActual: Joi.number().default(0),
+  // Tope de plausibilidad: evita que un tecleo (ej. 6565656) quede como
+  // kilometraje del vehículo y desalinee los planes de mantenimiento.
+  kilometrajeActual: Joi.number()
+    .min(0)
+    .max(2000000)
+    .default(0)
+    .messages({
+      "number.max":
+        "El kilometraje no parece real (máximo 2.000.000 km). Verifique el dato.",
+    }),
 });
 
 const updateVehiculo = createVehiculo.fork(

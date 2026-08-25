@@ -74,7 +74,11 @@ const createOrden = Joi.object({
   planItemNombre: Joi.string().allow("", null),
   prioridad: Joi.string().valid("BAJA", "MEDIA", "ALTA", "URGENTE"),
   descripcion: Joi.string().required(),
-  kilometraje: Joi.number().min(0).allow(null),
+  kilometraje: Joi.number().min(0).max(2000000).allow(null)
+    .messages({
+      "number.max":
+        "El kilometraje no parece real (máximo 2.000.000 km). Verifique el dato.",
+    }),
   mecanico: mongoId.allow(null),
   taller: Joi.string().allow("", null),
   fechaProgramada: Joi.date().allow(null),
@@ -88,7 +92,11 @@ const updateOrden = Joi.object({
   prioridad: Joi.string().valid("BAJA", "MEDIA", "ALTA", "URGENTE"),
   taller: Joi.string().allow("", null),
   fechaProgramada: Joi.date().allow(null),
-  kilometraje: Joi.number().min(0).allow(null),
+  kilometraje: Joi.number().min(0).max(2000000).allow(null)
+    .messages({
+      "number.max":
+        "El kilometraje no parece real (máximo 2.000.000 km). Verifique el dato.",
+    }),
   actividades: Joi.array().items(actividad),
   repuestos: Joi.array().items(repuesto),
   manoDeObra,
@@ -101,7 +109,11 @@ const asignarOrden = Joi.object({
 });
 
 const cerrarOrden = Joi.object({
-  kilometraje: Joi.number().min(0),
+  kilometraje: Joi.number().min(0).max(2000000)
+    .messages({
+      "number.max":
+        "El kilometraje no parece real (máximo 2.000.000 km). Verifique el dato.",
+    }),
   observacionesCierre: Joi.string().allow("", null),
   actividades: Joi.array().items(actividad),
   repuestos: Joi.array().items(repuesto),
