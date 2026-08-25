@@ -54,7 +54,8 @@ const ManifiestoExpedidoSchema = new Schema(
 
     ultimoError: String,
 
-    creadoPor: { type: Schema.Types.ObjectId, ref: "User" },
+    // El userId viene de Cellvi como texto (no es ObjectId de Mongo)
+    creadoPor: { type: String, default: null },
     deletedAt: { type: Date, default: null },
   },
   { timestamps: true },

@@ -45,9 +45,10 @@ router.put(
 router.delete("/planes/:id", checkRole(GESTION), ctrl.eliminarPlan);
 
 // ═══ ÓRDENES DE TRABAJO ═══
+// El MECANICO puede crear OTs (si no indica mecánico, el controlador lo auto-asigna)
 router.post(
   "/ordenes",
-  checkRole(GESTION),
+  checkRole(OPERACION),
   validate(createOrden),
   ctrl.crearOrden,
 );

@@ -23,14 +23,25 @@ module.exports = {
   },
 
   // RNDC SOAP API
+  // Arquitectura post-migración RNDC2 (Guía WS V5, mayo 2026): producción
+  // tiene 3 URLs según la función; el ambiente de pruebas es uno solo.
   rndc: {
+    // rndcws: todos los procesos EXCEPTO expedir remesas/manifiestos y consultas
     endpoint:
       process.env.SOAP_ENDPOINT_URL ||
       "http://rndcws.mintransporte.gov.co:8080/soap/IBPMServices",
+    // rndcws2: EXPEDIR remesas y manifiestos (procesos 3 y 4)
+    endpointExpedicion:
+      process.env.SOAP_ENDPOINT_URL_EXPEDICION ||
+      "http://rndcws2.mintransporte.gov.co:8080/soap/IBPMServices",
+    // plc: solo CONSULTAS (tipo 3)
+    endpointConsultas:
+      process.env.SOAP_ENDPOINT_URL_CONSULTAS ||
+      "http://plc.mintransporte.gov.co:8080/soap/IBPMServices",
     // Ambiente de pruebas oficial del RNDC (bd copia de producción)
     endpointPruebas:
       process.env.SOAP_ENDPOINT_URL_PRUEBAS ||
-      "http://plc.mintransporte.gov.co:8080/soap/IBPMServices",
+      "http://rndcpruebas.mintransporte.gov.co:8080/soap/IBPMServices",
     requestTimeout: parseInt(process.env.SOAP_REQUEST_TIMEOUT || "60000"),
     nitGps: process.env.RNDC_NIT_GPS || "",
   },
@@ -62,6 +73,13 @@ module.exports = {
   log: {
     level: process.env.LOG_LEVEL || "info",
     file: process.env.LOG_FILE || "logs/combined.log",
+  },
+
+  // Google Gemini (generación de contenido para redes y blog)
+  gemini: {
+    apiKey: process.env.GEMINI_API_KEY || "",
+    textModel: process.env.GEMINI_TEXT_MODEL || "gemini-2.5-flash",
+    imageModel: process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image",
   },
 
   // AWS S3

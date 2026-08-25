@@ -126,6 +126,7 @@ const PreoperacionalSchema = new Schema(
     contadorQR: { type: Number, default: 0 },
     fecha: { type: Date, default: Date.now },
     kilometraje: Number,
+    observaciones: String, // observaciones generales (nota del admin/conductor)
     creadoPor: String, // userId de quien creó la preoperacional
     creadoPorAdmin: { type: Boolean, default: false }, // true si fue creada por un admin en nombre del conductor
 

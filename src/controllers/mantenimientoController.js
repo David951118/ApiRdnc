@@ -12,6 +12,19 @@ function esAdmin(req) {
   );
 }
 
+/** true si el usuario es MECANICO sin rol administrativo */
+function esMecanicoSolo(req) {
+  const roles = (req.user.roles || []).map((r) =>
+    r.replace("ROLE_", "").toUpperCase(),
+  );
+  return (
+    roles.includes("MECANICO") &&
+    !roles.includes("ADMIN") &&
+    !roles.includes("SUPER_ADMIN") &&
+    !roles.includes("CLIENTE_ADMIN")
+  );
+}
+
 /**
  * true si el usuario es un conductor/cliente "puro" (ve solo el mantenimiento de
  * SUS vehículos): tiene rol de lectura conductor y NO es admin/cliente_admin/mecánico/auditor.
@@ -156,6 +169,11 @@ exports.crearOrden = async (req, res) => {
     });
     registrarHistorial(ot, req, "CREADA", req.body.descripcion);
 
+    // Un mecánico que crea una OT sin indicar mecánico queda auto-asignado
+    if (!ot.mecanico && esMecanicoSolo(req) && req.user.terceroId) {
+      ot.mecanico = req.user.terceroId;
+    }
+
     // Si nace asignada a un mecánico
     if (ot.mecanico) {
       ot.estado = "ASIGNADA";
@@ -180,14 +198,8 @@ exports.listarOrdenes = async (req, res) => {
     if (vehiculo) filtro.vehiculo = vehiculo;
     if (mecanico) filtro.mecanico = mecanico;
 
-    // Un MECANICO sin rol admin solo ve sus OTs asignadas
-    const esMecanicoSolo =
-      (req.user.roles || []).some((r) => r.includes("MECANICO")) &&
-      !esAdmin(req) &&
-      !(req.user.roles || []).some((r) => r.includes("CLIENTE_ADMIN"));
-    if (esMecanicoSolo && req.user.terceroId) {
-      filtro.mecanico = req.user.terceroId;
-    }
+    // El MECANICO ve todas las OTs de su empresa (scopeEmpresa ya acota el filtro);
+    // puede seguir filtrando por mecánico con el query param.
 
     // Un CONDUCTOR/cliente solo ve las OTs de sus propios vehículos
     if (esConductorSolo(req)) {

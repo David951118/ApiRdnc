@@ -93,7 +93,7 @@ exports.obtenerCredencial = async (req, res) => {
 /** POST /api/expedicion/credencial/verificar — prueba la credencial contra el RNDC */
 exports.verificarCredencial = async (req, res) => {
   try {
-    const empresa = empresaDe(req, req.body.empresa);
+    const empresa = empresaDe(req, req.body?.empresa);
     const resultado = await expedicionService.verificarCredencial(empresa);
     res.json({ success: resultado.success, data: resultado });
   } catch (error) {
@@ -281,10 +281,54 @@ exports.anularManifiesto = async (req, res) => {
   }
 };
 
+/** POST /api/expedicion/remesas/:id/cumplir — cumplir remesa (proceso 5) */
+exports.cumplirRemesa = async (req, res) => {
+  try {
+    const empresa = empresaDe(req, req.body.empresa);
+    const resultado = await expedicionService.cumplirRemesa(
+      empresa,
+      req.params.id,
+      req.body.variables,
+      req.user?.userId,
+    );
+    res.status(resultado.success ? 200 : 422).json({
+      success: resultado.success,
+      data: resultado.remesa,
+      message: resultado.success
+        ? `Cumplido de remesa radicado en el RNDC (ingresoid ${resultado.radicado})`
+        : resultado.error,
+    });
+  } catch (error) {
+    responderError(res, error, "cumplirRemesa");
+  }
+};
+
+/** POST /api/expedicion/manifiestos/:id/cumplir — cumplir manifiesto (proceso 6) */
+exports.cumplirManifiesto = async (req, res) => {
+  try {
+    const empresa = empresaDe(req, req.body.empresa);
+    const resultado = await expedicionService.cumplirManifiesto(
+      empresa,
+      req.params.id,
+      req.body.variables,
+      req.user?.userId,
+    );
+    res.status(resultado.success ? 200 : 422).json({
+      success: resultado.success,
+      data: resultado.manifiesto,
+      message: resultado.success
+        ? `Cumplido de manifiesto radicado en el RNDC (ingresoid ${resultado.radicado})`
+        : resultado.error,
+    });
+  } catch (error) {
+    responderError(res, error, "cumplirManifiesto");
+  }
+};
+
 /** POST /api/expedicion/manifiestos/:id/consultar-aceptacion — proceso 73 */
 exports.consultarAceptacion = async (req, res) => {
   try {
-    const empresa = empresaDe(req, req.body.empresa);
+    const empresa = empresaDe(req, req.body?.empresa);
     const resultado = await expedicionService.consultarAceptacion(
       empresa,
       req.params.id,

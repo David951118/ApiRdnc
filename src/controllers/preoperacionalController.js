@@ -9,7 +9,9 @@ const logger = require("../config/logger");
 /**
  * Scope de preoperacionales según rol:
  * - ADMIN/SUPER: todo
- * - CLIENTE_ADMIN: vehículos de su empresa
+ * - CLIENTE_ADMIN/MECANICO: vehículos de su empresa (el mecánico lee las
+ *   novedades/fallas de toda la flota para abrir OTs; las rutas de mutación
+ *   siguen restringidas por checkRole o por bloqueo explícito)
  * - CLIENTE/CONDUCTOR/PROPIETARIO: vehículos asignados (propietario,
  *   conductoresAsignados) + legacy vehiculosPermitidos por placa.
  */
@@ -18,7 +20,9 @@ async function getPreoperacionalScope(req) {
     r.replace("ROLE_", "").toUpperCase(),
   );
   const isAdmin = rolesNormalized.includes("ADMIN");
-  const isClienteAdmin = rolesNormalized.includes("CLIENTE_ADMIN");
+  const isClienteAdmin =
+    rolesNormalized.includes("CLIENTE_ADMIN") ||
+    rolesNormalized.includes("MECANICO");
 
   if (isAdmin) {
     return {};
@@ -86,6 +90,22 @@ async function tieneAccesoVehiculo(req, vehiculoId) {
     return scope.vehiculo.$in.some((id) => id.toString() === idStr);
   }
   return scope.vehiculo.toString() === (vehiculoId?.toString?.() || vehiculoId);
+}
+
+/**
+ * true si el usuario es MECANICO sin rol administrativo. Su scope de lectura es
+ * el de la empresa, pero no debe editar/eliminar preoperacionales ajenas.
+ */
+function esMecanicoSolo(req) {
+  const roles = (req.user?.roles || []).map((r) =>
+    r.replace("ROLE_", "").toUpperCase(),
+  );
+  return (
+    roles.includes("MECANICO") &&
+    !roles.includes("ADMIN") &&
+    !roles.includes("SUPER_ADMIN") &&
+    !roles.includes("CLIENTE_ADMIN")
+  );
 }
 
 /**
@@ -508,6 +528,12 @@ exports.getOne = async (req, res) => {
  */
 exports.update = async (req, res) => {
   try {
+    if (esMecanicoSolo(req)) {
+      return res.status(403).json({
+        success: false,
+        message: "El rol mecánico no puede editar preoperacionales",
+      });
+    }
     const { id } = req.params;
     const check = await Preoperacional.findOne({ _id: id, deletedAt: null });
 
@@ -551,6 +577,12 @@ exports.update = async (req, res) => {
  */
 exports.softDelete = async (req, res) => {
   try {
+    if (esMecanicoSolo(req)) {
+      return res.status(403).json({
+        success: false,
+        message: "El rol mecánico no puede eliminar preoperacionales",
+      });
+    }
     const { id } = req.params;
     const check = await Preoperacional.findOne({ _id: id, deletedAt: null });
 
@@ -590,6 +622,12 @@ exports.softDelete = async (req, res) => {
  */
 exports.restore = async (req, res) => {
   try {
+    if (esMecanicoSolo(req)) {
+      return res.status(403).json({
+        success: false,
+        message: "El rol mecánico no puede restaurar preoperacionales",
+      });
+    }
     const { id } = req.params;
     const check = await Preoperacional.findById(id);
 

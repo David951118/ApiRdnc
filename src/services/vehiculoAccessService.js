@@ -5,7 +5,8 @@ const Vehiculo = require("../models/Vehiculo");
  * Determina el alcance de vehículos a los que el usuario tiene acceso, según rol.
  * Reutiliza la misma lógica que preoperacionales para mantener coherencia:
  * - ADMIN/SUPER_ADMIN: todos (filtro vacío).
- * - CLIENTE_ADMIN: vehículos de su empresa.
+ * - CLIENTE_ADMIN/MECANICO: vehículos de su empresa (el mecánico no tiene
+ *   vehículos asignados en Cellvi; opera sobre toda la flota de su empresa).
  * - CLIENTE/CONDUCTOR/PROPIETARIO/USER: vehículos donde el tercero del usuario sea
  *   propietario o esté en conductoresAsignados, más el legacy de Cellvi (vehiculosPermitidos
  *   por placa en la sesión).
@@ -21,7 +22,9 @@ async function getVehiculoScope(req) {
   );
   const isAdmin =
     rolesNormalized.includes("ADMIN") || rolesNormalized.includes("SUPER_ADMIN");
-  const isClienteAdmin = rolesNormalized.includes("CLIENTE_ADMIN");
+  const isClienteAdmin =
+    rolesNormalized.includes("CLIENTE_ADMIN") ||
+    rolesNormalized.includes("MECANICO");
 
   if (isAdmin) return {};
 

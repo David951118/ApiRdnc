@@ -56,8 +56,9 @@ if (!isProduction) {
   app.use(cors({ origin: allowedOrigins, credentials: true })); // Producción: whitelist
 }
 // Si producción + sin ALLOWED_ORIGINS: no se usa cors() → Apache lo maneja
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+// 25mb: las fotos del estudio de contenido suben en base64 vía backend
+app.use(express.json({ limit: "25mb" }));
+app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 
 // Logging: formato compacto en producción, detallado en desarrollo
 app.use(morgan(isProduction ? "combined" : "dev"));
@@ -102,6 +103,8 @@ app.get("/health", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/verificar", require("./routes/verificacion"));
 app.use("/api/contacto", require("./routes/contacto"));
+// Contenido (blog público + administración solo ADMIN; auth interna por ruta)
+app.use("/api/contenido", require("./routes/contenido"));
 
 // Auditoría transversal: registra toda mutación exitosa de usuarios autenticados.
 // No exige auth por sí mismo (lee req.user al finalizar la respuesta).

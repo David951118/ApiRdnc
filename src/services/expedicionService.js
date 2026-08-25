@@ -53,9 +53,15 @@ function construirBloqueRemesas(consecutivos = []) {
 
 /**
  * Obtiene la credencial ACTIVA de la empresa y construye el cliente RNDC
- * apuntando al ambiente que corresponda.
+ * apuntando al ambiente/URL que corresponda.
+ *
+ * Desde la migración a RNDC2 (Guía WS V5) producción usa 3 URLs por función:
+ *   - 'expedir'  → rndcws2 (SOLO expedir remesas y manifiestos, procesos 3/4)
+ *   - 'consulta' → plc     (SOLO consultas, tipo 3)
+ *   - 'general'  → rndcws  (el resto: terceros, vehículos, anulaciones, cumplidos)
+ * En modoPruebas todo va al ambiente único de pruebas (rndcpruebas).
  */
-async function clienteParaEmpresa(empresaId) {
+async function clienteParaEmpresa(empresaId, proposito = "general") {
   const credencial = await CredencialRndc.findOne({
     empresa: empresaId,
     estado: "ACTIVA",
@@ -77,9 +83,16 @@ async function clienteParaEmpresa(empresaId) {
     throw err;
   }
 
-  const endpoint = credencial.modoPruebas
-    ? config.rndc.endpointPruebas
-    : config.rndc.endpoint;
+  let endpoint;
+  if (credencial.modoPruebas) {
+    endpoint = config.rndc.endpointPruebas;
+  } else if (proposito === "expedir") {
+    endpoint = config.rndc.endpointExpedicion;
+  } else if (proposito === "consulta") {
+    endpoint = config.rndc.endpointConsultas;
+  } else {
+    endpoint = config.rndc.endpoint;
+  }
 
   return {
     client: new RNDCClient(credencial.usuarioWS, password, endpoint),
@@ -124,7 +137,7 @@ async function registrarVehiculo(empresaId, variables, userId) {
  * lo pasa a RADICADA si el RNDC devuelve ingresoid.
  */
 async function expedirRemesa(empresaId, consecutivoRemesa, variables, userId) {
-  const { client, credencial } = await clienteParaEmpresa(empresaId);
+  const { client, credencial } = await clienteParaEmpresa(empresaId, "expedir");
   const ambiente = credencial.modoPruebas ? "PRUEBAS" : "PRODUCCION";
 
   // Borrador local (idempotente por empresa+consecutivo)
@@ -187,7 +200,7 @@ async function expedirManifiesto(
   variables,
   userId,
 ) {
-  const { client, credencial } = await clienteParaEmpresa(empresaId);
+  const { client, credencial } = await clienteParaEmpresa(empresaId, "expedir");
   const ambiente = credencial.modoPruebas ? "PRUEBAS" : "PRODUCCION";
 
   // Las remesas deben existir localmente y estar RADICADAS en el mismo ambiente
@@ -364,6 +377,106 @@ async function anularManifiesto(empresaId, manifiestoId, motivo, userId) {
 }
 
 /**
+ * Cumplir una REMESA radicada (proceso 5). Las variables del cumplido
+ * (fechas/horas reales de cargue y descargue, cantidad entregada, etc.)
+ * vienen del diccionario RNDC — se validan de fondo en el Ministerio.
+ */
+async function cumplirRemesa(empresaId, remesaId, variables, userId) {
+  const remesa = await RemesaExpedida.findOne({
+    _id: remesaId,
+    empresa: empresaId,
+    deletedAt: null,
+  });
+  if (!remesa) {
+    const err = new Error("Remesa no encontrada");
+    err.statusCode = 404;
+    throw err;
+  }
+  if (remesa.estado !== "RADICADA") {
+    const err = new Error(
+      `Solo se pueden cumplir remesas RADICADAS (estado actual: ${remesa.estado})`,
+    );
+    err.statusCode = 409;
+    throw err;
+  }
+
+  const { client, credencial } = await clienteParaEmpresa(empresaId);
+  const xml = construirVariablesXML({
+    NUMNITEMPRESATRANSPORTE: credencial.nitEmpresaTransporte,
+    CONSECUTIVOREMESA: remesa.consecutivoRemesa,
+    ...variables,
+  });
+
+  const resultado = await client.cumplirRemesa(xml, {
+    empresaId: String(empresaId),
+    consecutivoRemesa: remesa.consecutivoRemesa,
+    userId,
+  });
+
+  if (resultado.success && resultado.radicado) {
+    remesa.estado = "CUMPLIDA";
+    remesa.fechaCumplido = new Date();
+    remesa.ingresoidCumplido = String(resultado.radicado);
+    remesa.ultimoError = null;
+    await remesa.save();
+  } else {
+    remesa.ultimoError = resultado.error || null;
+    await remesa.save();
+  }
+
+  return { ...resultado, remesa };
+}
+
+/**
+ * Cumplir un MANIFIESTO radicado/aceptado (proceso 6).
+ */
+async function cumplirManifiesto(empresaId, manifiestoId, variables, userId) {
+  const manifiesto = await ManifiestoExpedido.findOne({
+    _id: manifiestoId,
+    empresa: empresaId,
+    deletedAt: null,
+  });
+  if (!manifiesto) {
+    const err = new Error("Manifiesto no encontrado");
+    err.statusCode = 404;
+    throw err;
+  }
+  if (!["RADICADO", "ACEPTADO"].includes(manifiesto.estado)) {
+    const err = new Error(
+      `Solo se pueden cumplir manifiestos RADICADOS o ACEPTADOS (estado actual: ${manifiesto.estado})`,
+    );
+    err.statusCode = 409;
+    throw err;
+  }
+
+  const { client, credencial } = await clienteParaEmpresa(empresaId);
+  const xml = construirVariablesXML({
+    NUMNITEMPRESATRANSPORTE: credencial.nitEmpresaTransporte,
+    NUMMANIFIESTOCARGA: manifiesto.numManifiestoCarga,
+    ...variables,
+  });
+
+  const resultado = await client.cumplirManifiesto(xml, {
+    empresaId: String(empresaId),
+    numManifiestoCarga: manifiesto.numManifiestoCarga,
+    userId,
+  });
+
+  if (resultado.success && resultado.radicado) {
+    manifiesto.estado = "CUMPLIDO";
+    manifiesto.fechaCumplido = new Date();
+    manifiesto.ingresoidCumplido = String(resultado.radicado);
+    manifiesto.ultimoError = null;
+    await manifiesto.save();
+  } else {
+    manifiesto.ultimoError = resultado.error || null;
+    await manifiesto.save();
+  }
+
+  return { ...resultado, manifiesto };
+}
+
+/**
  * Consultar la aceptación electrónica de un manifiesto (tipo 3, proceso 73)
  * y sincronizar el estado local si ya fue aceptado.
  */
@@ -384,7 +497,7 @@ async function consultarAceptacion(empresaId, manifiestoId) {
     throw err;
   }
 
-  const { client, credencial } = await clienteParaEmpresa(empresaId);
+  const { client, credencial } = await clienteParaEmpresa(empresaId, "consulta");
   const documento = construirVariablesXML({
     NUMNITEMPRESATRANSPORTE: credencial.nitEmpresaTransporte,
     INGRESOIDMANIFIESTO: manifiesto.ingresoid,
@@ -414,7 +527,7 @@ async function consultarAceptacion(empresaId, manifiestoId) {
  * Verifica que la credencial funcione contra el RNDC (consulta liviana).
  */
 async function verificarCredencial(empresaId) {
-  const { client, credencial } = await clienteParaEmpresa(empresaId);
+  const { client, credencial } = await clienteParaEmpresa(empresaId, "consulta");
 
   const documento = construirVariablesXML({
     NUMNITEMPRESATRANSPORTE: credencial.nitEmpresaTransporte,
@@ -461,6 +574,8 @@ module.exports = {
   expedirManifiesto,
   anularRemesa,
   anularManifiesto,
+  cumplirRemesa,
+  cumplirManifiesto,
   consultarAceptacion,
   verificarCredencial,
 };

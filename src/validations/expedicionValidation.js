@@ -69,6 +69,13 @@ const anulacion = Joi.object({
   motivo: Joi.string().min(5).max(300).required(),
 });
 
+// Cumplido (procesos 5/6): fechas/horas reales, cantidades, etc. del
+// diccionario RNDC — flexible como remesa/manifiesto.
+const cumplido = Joi.object({
+  empresa: objectId.optional(),
+  variables: variablesPlanas.required(),
+});
+
 module.exports = {
   credencial,
   tercero,
@@ -76,4 +83,5 @@ module.exports = {
   remesa,
   manifiesto,
   anulacion,
+  cumplido,
 };

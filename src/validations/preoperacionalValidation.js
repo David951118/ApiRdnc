@@ -126,15 +126,14 @@ const createPreoperacional = Joi.object({
   firmadoCheck: Joi.boolean().optional(),
   firmaConductorUrl: Joi.string().uri().allow("", null).optional(),
 
-  // Creación delegada por un administrador de flota en nombre del conductor
+  // Observaciones generales de la preoperacional (nota del admin/conductor)
+  observaciones: Joi.string().max(2000).allow("", null).optional(),
+
+  // Creación delegada por un administrador de flota en nombre del conductor.
+  // creadoPorUserId es el userId de Cellvi (texto libre, NO ObjectId); el
+  // backend no confía en él y lo descarta, así que solo se valida la forma.
   creadoPorAdmin: Joi.boolean().optional(),
-  creadoPorUserId: Joi.string()
-    .regex(/^[0-9a-fA-F]{24}$/)
-    .optional()
-    .allow("", null)
-    .messages({
-      "string.pattern.base": "creadoPorUserId inválido (ObjectId 24 caracteres)",
-    }),
+  creadoPorUserId: Joi.string().max(100).optional().allow("", null),
 });
 
 const updatePreoperacional = createPreoperacional.fork(

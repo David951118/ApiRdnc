@@ -21,11 +21,11 @@ router.post(
 // Listar
 router.get("/", authenticate, vehiculoController.getAll);
 
-// Listado resumido para selectores
+// Listado resumido para selectores (MECANICO lo usa en el formulario de OTs)
 router.get(
   "/list",
   authenticate,
-  checkRole(["ADMIN", "CLIENTE_ADMIN"]),
+  checkRole(["ADMIN", "CLIENTE_ADMIN", "MECANICO"]),
   vehiculoController.getList,
 );
 

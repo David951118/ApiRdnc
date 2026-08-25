@@ -37,8 +37,9 @@ const CredencialRndcSchema = new Schema(
     ultimaVerificacionOk: Boolean,
     ultimaVerificacionError: String,
 
-    creadoPor: { type: Schema.Types.ObjectId, ref: "User" },
-    actualizadoPor: { type: Schema.Types.ObjectId, ref: "User" },
+    // El userId viene de Cellvi como texto (no es ObjectId de Mongo)
+    creadoPor: { type: String, default: null },
+    actualizadoPor: { type: String, default: null },
   },
   { timestamps: true },
 );

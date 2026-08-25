@@ -58,6 +58,12 @@ router.post(
   validate(val.anulacion),
   ctrl.anularRemesa,
 );
+router.post(
+  "/remesas/:id/cumplir",
+  checkRole(EXPEDICION),
+  validate(val.cumplido),
+  ctrl.cumplirRemesa,
+);
 
 // ═══ Manifiestos ═══
 router.post(
@@ -72,6 +78,12 @@ router.post(
   checkRole(EXPEDICION),
   validate(val.anulacion),
   ctrl.anularManifiesto,
+);
+router.post(
+  "/manifiestos/:id/cumplir",
+  checkRole(EXPEDICION),
+  validate(val.cumplido),
+  ctrl.cumplirManifiesto,
 );
 router.post(
   "/manifiestos/:id/consultar-aceptacion",

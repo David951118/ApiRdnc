@@ -39,3 +39,5 @@ postman/
 MANUAL-NUEVAS-FUNCIONALIDADES.md
 PLAN-MEJORAMIENTO.md
 PRUEBAS-PENDIENTES.md
+# Estado local de las pruebas E2E de expedicion
+scripts/.e2e-state.json

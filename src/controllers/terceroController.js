@@ -202,7 +202,7 @@ exports.getAll = async (req, res) => {
 // Listado resumido para selectores (Solo ADMIN / CLIENTE_ADMIN)
 exports.getList = async (req, res) => {
   try {
-    const { page = 1, limit = 50, search, includeDeleted = false } = req.query;
+    const { page = 1, limit = 50, search, includeDeleted = false, rol } = req.query;
     const { isAdmin, isClienteAdmin } = getRoles(req);
     const query = {};
 
@@ -212,6 +212,11 @@ exports.getList = async (req, res) => {
 
     if (!isAdmin && isClienteAdmin && req.user.empresaId) {
       query.empresa = req.user.empresaId;
+    }
+
+    // Filtro por rol del tercero (ej: rol=CONDUCTOR para selectores)
+    if (rol) {
+      query.roles = rol;
     }
 
     if (search) {
@@ -224,7 +229,7 @@ exports.getList = async (req, res) => {
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const terceros = await Tercero.find(query)
-      .select("nombres apellidos identificacion")
+      .select("nombres apellidos identificacion tipoId roles")
       .limit(parseInt(limit))
       .skip(skip)
       .sort({ nombres: 1 })
