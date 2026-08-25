@@ -451,6 +451,36 @@ exports.anularOrden = async (req, res) => {
   }
 };
 
+/**
+ * DELETE /api/mantenimiento/ordenes/:id
+ * Eliminar una orden de trabajo (soft delete). Exclusivo de ADMIN/SUPER_ADMIN:
+ * el CLIENTE_ADMIN solo puede anular, porque la anulación deja la orden a la
+ * vista con su historial y el borrado la retira del módulo.
+ */
+exports.eliminarOrden = async (req, res) => {
+  try {
+    const ot = await OrdenTrabajo.findOne({
+      _id: req.params.id,
+      deletedAt: null,
+    });
+    if (!ot)
+      return res
+        .status(404)
+        .json({ success: false, message: "Orden no encontrada" });
+
+    registrarHistorial(ot, req, "ELIMINADA", req.body?.motivo || "");
+    await ot.softDelete(req.user.userId);
+
+    logger.info(
+      `OT ${ot.consecutivo || ot._id} eliminada por ${req.user?.username || req.user?.userId}`,
+    );
+    res.json({ success: true, message: "Orden de trabajo eliminada" });
+  } catch (error) {
+    logger.error(`Error eliminando orden: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // ═══════════════════ ALERTAS ═══════════════════
 
 /**

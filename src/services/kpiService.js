@@ -4,6 +4,7 @@ const OrdenTrabajo = require("../models/OrdenTrabajo");
 const CargaCombustible = require("../models/CargaCombustible");
 const Viaje = require("../models/Viaje");
 const Preoperacional = require("../models/Preoperacional");
+const { rangoDias } = require("../utils/rangoFechas");
 
 /**
  * Servicio de KPIs gerenciales (requerimiento d).
@@ -17,11 +18,10 @@ const Preoperacional = require("../models/Preoperacional");
  * Todos los métodos aceptan { empresaId, desde, hasta }.
  */
 
+// Los días sueltos ("2026-08-25") se anclan al calendario colombiano para que
+// el "hasta" incluya ese día completo (ver utils/rangoFechas.js).
 function rangoFechas(desde, hasta) {
-  const filtro = {};
-  if (desde) filtro.$gte = new Date(desde);
-  if (hasta) filtro.$lte = new Date(hasta);
-  return Object.keys(filtro).length ? filtro : null;
+  return rangoDias(desde, hasta);
 }
 
 function toObjectId(id) {

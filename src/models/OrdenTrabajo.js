@@ -93,7 +93,7 @@ const OrdenTrabajoSchema = new Schema(
       {
         fecha: { type: Date, default: Date.now },
         usuario: String,
-        accion: String, // CREADA, ASIGNADA, INICIADA, CERRADA, ANULADA, ACTUALIZADA
+        accion: String, // CREADA, ASIGNADA, INICIADA, CERRADA, ANULADA, ACTUALIZADA, ELIMINADA
         detalle: String,
       },
     ],

@@ -80,4 +80,11 @@ router.post(
   ctrl.anularOrden,
 );
 
+// Borrar una OT: solo ADMIN de la plataforma. El CLIENTE_ADMIN anula, no borra.
+router.delete(
+  "/ordenes/:id",
+  checkRole(["ADMIN", "SUPER_ADMIN"]),
+  ctrl.eliminarOrden,
+);
+
 module.exports = router;

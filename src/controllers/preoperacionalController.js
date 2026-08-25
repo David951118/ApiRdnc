@@ -6,6 +6,7 @@ const Documento = require("../models/Documento");
 const s3Service = require("../services/s3Service");
 const logger = require("../config/logger");
 const { labelItemPreop } = require("../utils/preopLabels");
+const { rangoDias } = require("../utils/rangoFechas");
 
 /**
  * Scope de preoperacionales según rol:
@@ -1162,11 +1163,10 @@ exports.getEstadisticas = async (req, res) => {
     if (conductorId)
       match.conductor = new mongoose.Types.ObjectId(conductorId);
 
-    if (fechaDesde || fechaHasta) {
-      match.fecha = {};
-      if (fechaDesde) match.fecha.$gte = new Date(fechaDesde);
-      if (fechaHasta) match.fecha.$lte = new Date(fechaHasta);
-    }
+    // El rango se ancla al dia calendario colombiano, para que "hasta hoy"
+    // incluya lo registrado hoy y no corte a la medianoche UTC.
+    const rango = rangoDias(fechaDesde, fechaHasta);
+    if (rango) match.fecha = rango;
 
     // Si filtran por empresa, buscar vehículos de esa empresa
     if (empresaId) {
@@ -1393,11 +1393,10 @@ exports.historialCorrecciones = async (req, res) => {
       "novedades.0": { $exists: true }, // Solo las que tienen novedades
     };
 
-    if (fechaDesde || fechaHasta) {
-      match.fecha = {};
-      if (fechaDesde) match.fecha.$gte = new Date(fechaDesde);
-      if (fechaHasta) match.fecha.$lte = new Date(fechaHasta);
-    }
+    // El rango se ancla al dia calendario colombiano, para que "hasta hoy"
+    // incluya lo registrado hoy y no corte a la medianoche UTC.
+    const rango = rangoDias(fechaDesde, fechaHasta);
+    if (rango) match.fecha = rango;
 
     const preops = await Preoperacional.find(match)
       .sort({ fecha: -1 })
