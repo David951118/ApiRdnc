@@ -1646,23 +1646,51 @@ exports.recibirGarantia = async (req, res) => {
 /**
  * Resuelve un rango de fechas a partir de query params.
  * Modos soportados:
+ *   - Por mes calendario completo: ?mes=YYYY-MM (día 1 → último día del mes)
  *   - Por período predefinido: ?periodo=hoy|semanal|quincenal|mensual|trimestral|semestral|anual
  *   - Por rango personalizado: ?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
  *   - Si no se manda nada → mensual (últimos 30 días).
  *
- * El rango personalizado tiene prioridad sobre el período si llegan ambos.
+ * Prioridad: mes > rango personalizado > período.
  * Las fechas inválidas caen al default. `hasta` se ajusta al fin de día (23:59:59.999)
  * y `desde` al inicio (00:00:00).
  */
+
+/**
+ * Parsea "YYYY-MM-DD" como fecha LOCAL del servidor. `new Date("YYYY-MM-DD")`
+ * interpreta la cadena en UTC, lo que en zonas UTC-5 corría el rango un día
+ * (el reporte "mensual" quedaba de 29 días y colaba actividades de otro mes).
+ */
+function parseFechaLocal(str, finDeDia = false) {
+  if (typeof str !== "string") return null;
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) {
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const d = finDeDia
+    ? new Date(+m[1], +m[2] - 1, +m[3], 23, 59, 59, 999)
+    : new Date(+m[1], +m[2] - 1, +m[3], 0, 0, 0, 0);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 function resolverRango(query) {
-  const { periodo, desde, hasta } = query;
+  const { periodo, desde, hasta, mes } = query;
+
+  // Modo mes calendario completo: ?mes=YYYY-MM
+  if (mes && /^\d{4}-(0[1-9]|1[0-2])$/.test(mes)) {
+    const [y, m] = mes.split("-").map(Number);
+    const inicio = new Date(y, m - 1, 1, 0, 0, 0, 0);
+    const fin = new Date(y, m, 0, 23, 59, 59, 999); // día 0 del mes siguiente = último día del mes
+    return { desde: inicio, hasta: fin, etiqueta: `mensual ${mes}` };
+  }
 
   // Modo rango personalizado
   if (desde || hasta) {
-    const desdeDate = desde ? new Date(desde) : new Date("1970-01-01");
-    const hastaDate = hasta ? new Date(hasta) : new Date();
+    const desdeDate = desde ? parseFechaLocal(desde) : new Date(1970, 0, 1);
+    const hastaDate = hasta ? parseFechaLocal(hasta, true) : new Date();
 
-    if (isNaN(desdeDate.getTime()) || isNaN(hastaDate.getTime())) {
+    if (!desdeDate || !hastaDate) {
       // Fecha inválida: caer a mensual.
       const fin = new Date();
       const inicio = new Date();
@@ -1670,8 +1698,6 @@ function resolverRango(query) {
       return { desde: inicio, hasta: fin, etiqueta: "mensual", invalidRange: true };
     }
 
-    desdeDate.setHours(0, 0, 0, 0);
-    hastaDate.setHours(23, 59, 59, 999);
     return { desde: desdeDate, hasta: hastaDate, etiqueta: "personalizado" };
   }
 
@@ -2651,7 +2677,7 @@ exports.reporteEquiposDevueltos = async (req, res) => {
     // Solo aplica filtro de rango si vienen periodo/desde/hasta en la query;
     // sin nada → devuelve histórico completo (comportamiento previo).
     const aplicaRango =
-      !!req.query.periodo || !!req.query.desde || !!req.query.hasta;
+      !!req.query.periodo || !!req.query.desde || !!req.query.hasta || !!req.query.mes;
     const { desde, hasta, etiqueta } = aplicaRango
       ? resolverRango(req.query)
       : { desde: null, hasta: null, etiqueta: "historico" };
