@@ -257,11 +257,21 @@ exports.getByCellviId = async (req, res) => {
       .select("vehiculo")
       .lean();
 
+    // Extra habilitada por un admin para hoy: permite una preoperacional
+    // adicional aunque ya exista una (p.ej. dos conductores en el mismo vehículo).
+    const extraDisponibleHoy = (v) => {
+      const fechaExtra = v.preoperacionalExtraHabilitada?.fecha;
+      if (!fechaExtra) return false;
+      const f = new Date(fechaExtra);
+      return f >= hoy && f < manana;
+    };
+
     const vehiculosConPreop = vehiculosConDocs.map((v) => ({
       ...v,
       preoperativaDiaria: preopsHoy.some(
         (p) => p.vehiculo.toString() === v._id.toString(),
       ),
+      preoperativaExtraDisponible: extraDisponibleHoy(v),
     }));
 
     res.json({
