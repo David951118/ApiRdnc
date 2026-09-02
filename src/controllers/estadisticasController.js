@@ -418,3 +418,182 @@ exports.getDocumentosResumen = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// ════════════════════════════════════════════════════════════════
+// RESUMEN INTEGRAL POR VEHÍCULO (popup de KPIs del PESV)
+// ════════════════════════════════════════════════════════════════
+
+const CargaCombustible = require("../models/CargaCombustible");
+const OrdenTrabajo = require("../models/OrdenTrabajo");
+const KilometrajeDiario = require("../models/KilometrajeDiario");
+const { rangoDias } = require("../utils/rangoFechas");
+
+/**
+ * GET /api/estadisticas/vehiculo/:vehiculoId?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
+ *
+ * Resumen integral de un vehículo en un rango (por defecto el mes corrido):
+ *  - preoperativas: totales por estado, cumplimiento por días y serie diaria
+ *  - tanqueos: galones, costo total, rendimiento promedio y detalle
+ *  - mantenimientos: OTs del período, costo total y detalle
+ *  - kilometraje: recorrido real consolidado de los snapshots diarios
+ */
+exports.getVehiculoResumen = async (req, res) => {
+  try {
+    const { vehiculoId } = req.params;
+    let { desde, hasta } = req.query;
+
+    // Por defecto: mes corrido (día 1 del mes actual → hoy, día Colombia)
+    const hoyCo = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Bogota",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+    if (!desde) desde = `${hoyCo.slice(0, 7)}-01`;
+    if (!hasta) hasta = hoyCo;
+    desde = String(desde).slice(0, 10);
+    hasta = String(hasta).slice(0, 10);
+
+    const vehiculo = await Vehiculo.findOne({ _id: vehiculoId, deletedAt: null })
+      .select("placa marca linea modelo numeroInterno kilometrajeActual idCellvi")
+      .lean();
+    if (!vehiculo) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Vehículo no encontrado" });
+    }
+
+    const rango = rangoDias(desde, hasta);
+
+    const [preops, tanqueos, ordenes, snapshots] = await Promise.all([
+      Preoperacional.find({ vehiculo: vehiculoId, deletedAt: null, fecha: rango })
+        .select("fecha estadoGeneral kilometraje novedades conductor")
+        .populate("conductor", "nombres apellidos")
+        .sort({ fecha: 1 })
+        .lean(),
+      CargaCombustible.find({ vehiculo: vehiculoId, deletedAt: null, fecha: rango })
+        .select("fecha kmTanqueo galones costoTotal costoPorGalon tipoCombustible estacion rendimientoTramo")
+        .sort({ fecha: 1 })
+        .lean(),
+      OrdenTrabajo.find({
+        vehiculo: vehiculoId,
+        deletedAt: null,
+        estado: { $ne: "ANULADA" },
+        createdAt: rango,
+      })
+        .select("numero estado prioridad descripcion planItemNombre kilometraje costoTotal costoRepuestos manoDeObra createdAt fechaCierre")
+        .sort({ createdAt: 1 })
+        .lean(),
+      KilometrajeDiario.find({
+        vehiculo: vehiculoId,
+        fecha: { $gte: desde, $lte: hasta },
+      })
+        .sort({ fecha: 1 })
+        .select("fecha kilometraje fuente")
+        .lean(),
+    ]);
+
+    // ── Preoperativas ──
+    const porEstado = { APROBADO: 0, NOVEDAD: 0, RECHAZADO: 0 };
+    const porDiaMap = new Map();
+    let novedadesPendientes = 0;
+    for (const p of preops) {
+      porEstado[p.estadoGeneral] = (porEstado[p.estadoGeneral] || 0) + 1;
+      novedadesPendientes += (p.novedades || []).filter((n) => !n.resuelta).length;
+      const dia = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Bogota",
+      }).format(new Date(p.fecha));
+      if (!porDiaMap.has(dia)) porDiaMap.set(dia, { fecha: dia, total: 0, estados: [] });
+      const entry = porDiaMap.get(dia);
+      entry.total += 1;
+      entry.estados.push(p.estadoGeneral);
+    }
+
+    // Días del rango transcurridos (para % de cumplimiento diario)
+    const dDesde = new Date(`${desde}T00:00:00-05:00`);
+    const dHasta = new Date(`${hasta}T00:00:00-05:00`);
+    const dHoy = new Date(`${hoyCo}T00:00:00-05:00`);
+    const finEfectivo = dHasta < dHoy ? dHasta : dHoy;
+    const diasRango = Math.max(
+      1,
+      Math.round((finEfectivo - dDesde) / 86400000) + 1,
+    );
+    const diasConPreop = porDiaMap.size;
+
+    // ── Tanqueos ──
+    const galones = tanqueos.reduce((s, t) => s + (t.galones || 0), 0);
+    const costoCombustible = tanqueos.reduce((s, t) => s + (t.costoTotal || 0), 0);
+    const rendimientos = tanqueos
+      .map((t) => t.rendimientoTramo)
+      .filter((r) => Number.isFinite(r) && r > 0);
+    const rendimientoPromedio = rendimientos.length
+      ? Math.round((rendimientos.reduce((s, r) => s + r, 0) / rendimientos.length) * 10) / 10
+      : null;
+
+    // ── Mantenimientos ──
+    const costoMantenimiento = ordenes.reduce((s, o) => s + (o.costoTotal || 0), 0);
+    const otsCerradas = ordenes.filter((o) => o.estado === "CERRADA").length;
+
+    // ── Kilometraje real (snapshots diarios) ──
+    let recorridoKm = 0;
+    for (let i = 1; i < snapshots.length; i++) {
+      const delta = snapshots[i].kilometraje - snapshots[i - 1].kilometraje;
+      if (delta > 0) recorridoKm += delta;
+    }
+    const kilometraje = {
+      dias: snapshots.length,
+      kmInicio: snapshots.length ? snapshots[0].kilometraje : null,
+      kmFin: snapshots.length ? snapshots[snapshots.length - 1].kilometraje : null,
+      recorridoKm: Math.round(recorridoKm),
+      snapshots,
+      nota:
+        snapshots.length < 2
+          ? "Aún no hay suficientes snapshots diarios para consolidar el recorrido (el worker captura uno por día)."
+          : null,
+    };
+
+    res.json({
+      success: true,
+      data: {
+        vehiculo,
+        rango: { desde, hasta, diasRango },
+        preoperativas: {
+          total: preops.length,
+          porEstado,
+          diasConPreop,
+          diasRango,
+          cumplimientoDias: Math.round((diasConPreop / diasRango) * 100),
+          novedadesPendientes,
+          porDia: [...porDiaMap.values()],
+          detalle: preops,
+        },
+        tanqueos: {
+          total: tanqueos.length,
+          galones: Math.round(galones * 100) / 100,
+          costoTotal: costoCombustible,
+          rendimientoPromedio,
+          detalle: tanqueos,
+        },
+        mantenimientos: {
+          total: ordenes.length,
+          cerradas: otsCerradas,
+          costoTotal: costoMantenimiento,
+          detalle: ordenes,
+        },
+        kilometraje,
+        costos: {
+          combustible: costoCombustible,
+          mantenimiento: costoMantenimiento,
+          total: costoCombustible + costoMantenimiento,
+          costoPorKm:
+            kilometraje.recorridoKm > 0
+              ? Math.round(((costoCombustible + costoMantenimiento) / kilometraje.recorridoKm) * 100) / 100
+              : null,
+        },
+      },
+    });
+  } catch (error) {
+    logger.error(`Error en resumen de vehículo: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};

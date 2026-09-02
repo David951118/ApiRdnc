@@ -36,4 +36,12 @@ router.get(
   estadisticasController.getEmpresaResumen,
 );
 
+// Resumen integral por vehículo (popup de KPIs)
+router.get(
+  "/vehiculo/:vehiculoId",
+  authenticate,
+  checkRole(["ADMIN", "CLIENTE_ADMIN", "AUDITOR"]),
+  estadisticasController.getVehiculoResumen,
+);
+
 module.exports = router;

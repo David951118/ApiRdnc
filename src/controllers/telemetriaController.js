@@ -142,3 +142,128 @@ exports.recorrido = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// ════════════════════════════════════════════════════════════════
+// KILOMETRAJE DIARIO (snapshots del worker kilometrajeDiario)
+// ════════════════════════════════════════════════════════════════
+
+const KilometrajeDiario = require("../models/KilometrajeDiario");
+
+/**
+ * Calcula el consolidado de recorrido a partir de snapshots ordenados por fecha.
+ * Suma solo las diferencias positivas para tolerar resets o correcciones del
+ * odómetro (una diferencia negativa no puede ser recorrido real).
+ */
+function consolidarRecorrido(snapshots) {
+  if (!snapshots || snapshots.length === 0) {
+    return { dias: 0, kmInicio: null, kmFin: null, recorridoKm: 0 };
+  }
+  let recorrido = 0;
+  for (let i = 1; i < snapshots.length; i++) {
+    const delta = snapshots[i].kilometraje - snapshots[i - 1].kilometraje;
+    if (delta > 0) recorrido += delta;
+  }
+  return {
+    dias: snapshots.length,
+    kmInicio: snapshots[0].kilometraje,
+    kmFin: snapshots[snapshots.length - 1].kilometraje,
+    fechaInicio: snapshots[0].fecha,
+    fechaFin: snapshots[snapshots.length - 1].fecha,
+    recorridoKm: Math.round(recorrido),
+  };
+}
+
+/**
+ * GET /api/telemetria/kilometraje-diario/:id?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
+ * Serie de snapshots diarios + consolidado de recorrido del rango.
+ * :id puede ser el ObjectId del vehículo o la placa.
+ */
+exports.kilometrajeDiario = async (req, res) => {
+  try {
+    const vehiculo = await resolverVehiculo(req.params.id);
+    if (!vehiculo)
+      return res
+        .status(404)
+        .json({ success: false, message: "Vehículo no encontrado" });
+
+    const { desde, hasta } = req.query;
+    const query = { vehiculo: vehiculo._id };
+    if (desde || hasta) {
+      query.fecha = {};
+      if (desde) query.fecha.$gte = String(desde).slice(0, 10);
+      if (hasta) query.fecha.$lte = String(hasta).slice(0, 10);
+    }
+
+    const snapshots = await KilometrajeDiario.find(query)
+      .sort({ fecha: 1 })
+      .select("fecha kilometraje fuente capturadoEn")
+      .lean();
+
+    res.json({
+      success: true,
+      data: {
+        vehiculo: { _id: vehiculo._id, placa: vehiculo.placa },
+        resumen: consolidarRecorrido(snapshots),
+        snapshots,
+      },
+    });
+  } catch (error) {
+    logger.error(`Error consultando kilometraje diario: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * GET /api/telemetria/recorrido-flota?desde=&hasta=
+ * Consolidado de recorrido por vehículo para toda la flota (para vistas admin).
+ */
+exports.recorridoFlota = async (req, res) => {
+  try {
+    const { desde, hasta } = req.query;
+    const match = {};
+    if (desde || hasta) {
+      match.fecha = {};
+      if (desde) match.fecha.$gte = String(desde).slice(0, 10);
+      if (hasta) match.fecha.$lte = String(hasta).slice(0, 10);
+    }
+
+    const snapshots = await KilometrajeDiario.find(match)
+      .sort({ vehiculo: 1, fecha: 1 })
+      .select("vehiculo placa fecha kilometraje")
+      .lean();
+
+    const porVehiculo = new Map();
+    for (const s of snapshots) {
+      const key = String(s.vehiculo);
+      if (!porVehiculo.has(key)) porVehiculo.set(key, { placa: s.placa, lista: [] });
+      porVehiculo.get(key).lista.push(s);
+    }
+
+    const data = [...porVehiculo.entries()].map(([vehiculoId, v]) => ({
+      vehiculo: vehiculoId,
+      placa: v.placa,
+      ...consolidarRecorrido(v.lista),
+    }));
+    data.sort((a, b) => b.recorridoKm - a.recorridoKm);
+
+    res.json({ success: true, data });
+  } catch (error) {
+    logger.error(`Error consultando recorrido de flota: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * POST /api/telemetria/kilometraje-diario/capturar
+ * Dispara manualmente la captura del snapshot del día (solo ADMIN).
+ */
+exports.capturarKilometrajeDiario = async (req, res) => {
+  try {
+    const { capturarSnapshotDiario } = require("../workers/kilometrajeDiario");
+    const resultado = await capturarSnapshotDiario();
+    res.json({ success: true, data: resultado });
+  } catch (error) {
+    logger.error(`Error capturando kilometraje diario: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};

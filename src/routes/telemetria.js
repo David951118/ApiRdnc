@@ -12,4 +12,17 @@ router.get("/posicion/:id", checkRole(LECTURA), ctrl.posicionActual);
 // Recorrido entre fechas + km calculados
 router.get("/recorrido/:id", checkRole(LECTURA), ctrl.recorrido);
 
+// Snapshots diarios de odómetro + consolidados de recorrido real
+router.post(
+  "/kilometraje-diario/capturar",
+  checkRole(["ADMIN", "SUPER_ADMIN"]),
+  ctrl.capturarKilometrajeDiario,
+);
+router.get(
+  "/recorrido-flota",
+  checkRole(["ADMIN", "SUPER_ADMIN", "CLIENTE_ADMIN", "AUDITOR"]),
+  ctrl.recorridoFlota,
+);
+router.get("/kilometraje-diario/:id", checkRole(LECTURA), ctrl.kilometrajeDiario);
+
 module.exports = router;

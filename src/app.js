@@ -80,6 +80,7 @@ connectDB().then(() => {
   require("./workers/alertasMantenimiento");
   require("./workers/reporteGerencial");
   require("./workers/purgarArchivosVencidos");
+  require("./workers/kilometrajeDiario");
 
   // Módulo de expedición RNDC: advierte si falta la llave de cifrado
   require("./utils/credencialCrypto").verificarConfiguracion();
