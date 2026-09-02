@@ -115,6 +115,30 @@ router.delete("/actividades/:id", ctrl.eliminarActividad);
 router.post("/actividades/:id/restore", ctrl.restoreActividad);
 router.delete("/actividades/:id/hard", ctrl.hardDeleteActividad);
 
+// ─── Cámaras (inventario de cámaras de la empresa) ───
+const camaraCtrl = require("../controllers/camaraController");
+
+router.post("/camaras/marcas", camaraCtrl.crearMarcaCamara);
+router.get("/camaras/marcas", camaraCtrl.listarMarcasCamara);
+router.put("/camaras/marcas/:id", camaraCtrl.actualizarMarcaCamara);
+router.delete("/camaras/marcas/:id", camaraCtrl.eliminarMarcaCamara);
+
+router.post("/camaras/modelos", camaraCtrl.crearModeloCamara);
+router.get("/camaras/modelos", camaraCtrl.listarModelosCamara);
+router.put("/camaras/modelos/:id", camaraCtrl.actualizarModeloCamara);
+router.delete("/camaras/modelos/:id", camaraCtrl.eliminarModeloCamara);
+
+router.get("/camaras/resumen", camaraCtrl.resumenCamaras);
+router.post("/camaras", camaraCtrl.crearCamara);
+router.get("/camaras", camaraCtrl.listarCamaras);
+router.get("/camaras/:id", camaraCtrl.obtenerCamara);
+router.put("/camaras/:id", camaraCtrl.actualizarCamara);
+router.delete("/camaras/:id", camaraCtrl.eliminarCamara);
+router.post("/camaras/:id/instalar", camaraCtrl.instalarCamara);
+router.post("/camaras/:id/retirar", camaraCtrl.retirarCamara);
+router.post("/camaras/:id/descartar", camaraCtrl.descartarCamara);
+router.post("/camaras/:id/reingresar", camaraCtrl.reingresarCamara);
+
 // ─── Reportes y dashboard ───
 router.get("/reportes/movimientos", ctrl.reporteMovimientos);
 router.get(
