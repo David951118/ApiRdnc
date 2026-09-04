@@ -61,6 +61,16 @@ const manoDeObra = Joi.object({
   costo: Joi.number().min(0),
 });
 
+// Factura opcional de la OT: metadatos del archivo ya subido a S3 con la
+// presigned URL de /documentos/presigned-url (folder mantenimiento/facturas).
+const factura = Joi.object({
+  url: Joi.string().uri().required(),
+  key: Joi.string().required(),
+  nombre: Joi.string().allow("", null),
+  mimeType: Joi.string().allow("", null),
+  tamano: Joi.number().min(0).allow(null),
+});
+
 const createOrden = Joi.object({
   vehiculo: mongoId.required(),
   tipo: Joi.string().valid("PREVENTIVO", "CORRECTIVO").required(),
@@ -85,6 +95,7 @@ const createOrden = Joi.object({
   actividades: Joi.array().items(actividad),
   repuestos: Joi.array().items(repuesto),
   manoDeObra,
+  factura: factura.allow(null),
 });
 
 const updateOrden = Joi.object({
@@ -119,6 +130,7 @@ const cerrarOrden = Joi.object({
   repuestos: Joi.array().items(repuesto),
   manoDeObra,
   taller: Joi.string().allow("", null),
+  factura: factura.allow(null),
 });
 
 const anularOrden = Joi.object({
@@ -133,4 +145,5 @@ module.exports = {
   asignarOrden,
   cerrarOrden,
   anularOrden,
+  facturaOrden: factura,
 };

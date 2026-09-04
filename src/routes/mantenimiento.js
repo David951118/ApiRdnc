@@ -11,6 +11,7 @@ const {
   asignarOrden,
   cerrarOrden,
   anularOrden,
+  facturaOrden,
 } = require("../validations/mantenimientoValidation");
 
 // Roles: gestión completa ADMIN/CLIENTE_ADMIN; MECANICO opera sus OTs;
@@ -78,6 +79,21 @@ router.post(
   checkRole(GESTION),
   validate(anularOrden),
   ctrl.anularOrden,
+);
+
+// Factura de la OT (opcional, archivo en S3). Se puede adjuntar, reemplazar o
+// quitar en cualquier estado salvo ANULADA: la factura suele llegar después
+// del cierre. El archivo se sube antes con POST /documentos/presigned-url.
+router.put(
+  "/ordenes/:id/factura",
+  checkRole(OPERACION),
+  validate(facturaOrden),
+  ctrl.adjuntarFactura,
+);
+router.delete(
+  "/ordenes/:id/factura",
+  checkRole(OPERACION),
+  ctrl.eliminarFactura,
 );
 
 // Borrar una OT: ADMIN y CLIENTE_ADMIN (este ultimo solo dentro de su empresa,

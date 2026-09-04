@@ -87,13 +87,32 @@ const OrdenTrabajoSchema = new Schema(
 
     observacionesCierre: String,
 
+    // Factura del trabajo (opcional): archivo PDF/imagen en S3
+    // (carpeta mantenimiento/facturas). Se puede adjuntar al crear, al cerrar
+    // o después vía PUT /ordenes/:id/factura (la factura suele llegar luego).
+    factura: {
+      type: new Schema(
+        {
+          url: { type: String, required: true },
+          key: { type: String, required: true }, // S3 key para poder borrarla
+          nombre: String,
+          mimeType: String,
+          tamano: Number,
+          subidoPor: String,
+          fecha: { type: Date, default: Date.now },
+        },
+        { _id: false },
+      ),
+      default: null,
+    },
+
     // Trazabilidad propia de la OT
     creadoPor: String,
     historial: [
       {
         fecha: { type: Date, default: Date.now },
         usuario: String,
-        accion: String, // CREADA, ASIGNADA, INICIADA, CERRADA, ANULADA, ACTUALIZADA, ELIMINADA
+        accion: String, // CREADA, ASIGNADA, INICIADA, CERRADA, ANULADA, ACTUALIZADA, ELIMINADA, FACTURA_ADJUNTADA, FACTURA_REEMPLAZADA, FACTURA_ELIMINADA
         detalle: String,
       },
     ],

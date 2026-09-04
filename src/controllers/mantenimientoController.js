@@ -2,6 +2,7 @@ const PlanMantenimiento = require("../models/PlanMantenimiento");
 const OrdenTrabajo = require("../models/OrdenTrabajo");
 const Vehiculo = require("../models/Vehiculo");
 const alertasService = require("../services/alertasMantenimientoService");
+const s3Service = require("../services/s3Service");
 const { getVehiculoScope } = require("../services/vehiculoAccessService");
 const logger = require("../config/logger");
 
@@ -53,6 +54,50 @@ function registrarHistorial(ot, req, accion, detalle = "") {
     accion,
     detalle,
   });
+}
+
+/** Metadatos de la factura (ya subida a S3) sellados con quién y cuándo */
+function prepararFactura(factura, req) {
+  if (!factura) return null;
+  return {
+    url: factura.url,
+    key: factura.key,
+    nombre: factura.nombre || "",
+    mimeType: factura.mimeType || "",
+    tamano: factura.tamano ?? null,
+    subidoPor: req.user.username,
+    fecha: new Date(),
+  };
+}
+
+/** Borra el archivo de una factura en S3 (best-effort, no rompe la petición) */
+async function borrarArchivoFactura(factura) {
+  if (!factura?.key) return;
+  try {
+    await s3Service.deleteObject(factura.key);
+  } catch (err) {
+    logger.warn(`No se pudo borrar la factura ${factura.key} de S3: ${err.message}`);
+  }
+}
+
+/**
+ * Reemplaza la factura de una OT (y borra el archivo anterior de S3 si cambió).
+ * Devuelve true si quedó una factura nueva registrada.
+ */
+async function aplicarFactura(ot, req, facturaBody) {
+  if (!facturaBody) return false;
+  const anterior = ot.factura ? ot.factura.toObject() : null;
+  ot.factura = prepararFactura(facturaBody, req);
+  registrarHistorial(
+    ot,
+    req,
+    anterior ? "FACTURA_REEMPLAZADA" : "FACTURA_ADJUNTADA",
+    ot.factura.nombre || ot.factura.key,
+  );
+  if (anterior?.key && anterior.key !== ot.factura.key) {
+    await borrarArchivoFactura(anterior);
+  }
+  return true;
 }
 
 // ═══════════════════ PLANES DE MANTENIMIENTO ═══════════════════
@@ -161,13 +206,15 @@ exports.crearOrden = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Vehículo no encontrado" });
 
+    const { factura, ...datos } = req.body;
     const ot = new OrdenTrabajo({
-      ...req.body,
+      ...datos,
       placa: vehiculo.placa,
       empresa: vehiculo.empresaAfiliadora || null,
       creadoPor: req.user.username,
     });
     registrarHistorial(ot, req, "CREADA", req.body.descripcion);
+    if (factura) await aplicarFactura(ot, req, factura);
 
     // Un mecánico que crea una OT sin indicar mecánico queda auto-asignado
     if (!ot.mecanico && esMecanicoSolo(req) && req.user.terceroId) {
@@ -418,6 +465,7 @@ exports.cerrarOrden = async (req, res) => {
     ot.fechaCierre = new Date();
     ot.observacionesCierre = req.body.observacionesCierre || "";
     registrarHistorial(ot, req, "CERRADA", ot.observacionesCierre);
+    if (req.body.factura) await aplicarFactura(ot, req, req.body.factura);
 
     await ot.save();
 
@@ -481,6 +529,66 @@ exports.anularOrden = async (req, res) => {
  * —que deja la orden a la vista con su historial—, esto la retira del módulo
  * y no se puede deshacer desde la plataforma.
  */
+/**
+ * PUT /ordenes/:id/factura — adjunta o reemplaza la factura de la OT.
+ * Permitido en cualquier estado salvo ANULADA (la factura suele llegar
+ * después del cierre). El body son los metadatos del archivo ya subido a S3.
+ */
+exports.adjuntarFactura = async (req, res) => {
+  try {
+    const ot = await OrdenTrabajo.findOne(
+      scopeEmpresa(req, { _id: req.params.id, deletedAt: null }),
+    );
+    if (!ot)
+      return res
+        .status(404)
+        .json({ success: false, message: "Orden no encontrada" });
+
+    if (ot.estado === "ANULADA") {
+      return res.status(400).json({
+        success: false,
+        message: "No se puede adjuntar factura a una orden ANULADA",
+      });
+    }
+
+    await aplicarFactura(ot, req, req.body);
+    await ot.save();
+    res.json({ success: true, data: ot });
+  } catch (error) {
+    logger.error(`Error adjuntando factura a la orden: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/** DELETE /ordenes/:id/factura — quita la factura y borra el archivo de S3 */
+exports.eliminarFactura = async (req, res) => {
+  try {
+    const ot = await OrdenTrabajo.findOne(
+      scopeEmpresa(req, { _id: req.params.id, deletedAt: null }),
+    );
+    if (!ot)
+      return res
+        .status(404)
+        .json({ success: false, message: "Orden no encontrada" });
+
+    if (!ot.factura) {
+      return res
+        .status(400)
+        .json({ success: false, message: "La orden no tiene factura adjunta" });
+    }
+
+    const anterior = ot.factura.toObject();
+    ot.factura = null;
+    registrarHistorial(ot, req, "FACTURA_ELIMINADA", anterior.nombre || anterior.key);
+    await ot.save();
+    await borrarArchivoFactura(anterior);
+    res.json({ success: true, data: ot });
+  } catch (error) {
+    logger.error(`Error eliminando factura de la orden: ${error.message}`);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 exports.eliminarOrden = async (req, res) => {
   try {
     // scopeEmpresa: el CLIENTE_ADMIN solo alcanza las OTs de su propia empresa.
