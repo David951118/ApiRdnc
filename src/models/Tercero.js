@@ -130,6 +130,19 @@ TerceroSchema.index(
 TerceroSchema.index({ roles: 1 });
 TerceroSchema.index({ empresa: 1 });
 
+// El índice único de usuarioCellvi es sparse: solo ignora documentos donde el
+// campo NO existe. Un "" o null sí se indexa y haría chocar a dos terceros sin
+// usuario (proveedores, clientes, propietarios). Por eso, si llega vacío, se
+// elimina el campo del documento en lugar de guardarlo vacío.
+TerceroSchema.pre("validate", function () {
+  if (typeof this.usuarioCellvi === "string") {
+    this.usuarioCellvi = this.usuarioCellvi.trim();
+  }
+  if (!this.usuarioCellvi) {
+    this.usuarioCellvi = undefined;
+  }
+});
+
 TerceroSchema.methods.softDelete = function (userId) {
   this.deletedAt = new Date();
   this.deletedBy = userId || null;

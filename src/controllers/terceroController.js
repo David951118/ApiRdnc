@@ -5,6 +5,16 @@ const { deleteDocumentosWithS3, cleanEntidadesAsociadas } = require("../helpers/
 const s3Service = require("../services/s3Service");
 const logger = require("../config/logger");
 
+// Mensaje legible para violaciones de índice único (E11000): puede ser la
+// identificación dentro de la empresa o el usuario Cellvi (único global).
+function mensajeDuplicado(error) {
+  const campos = Object.keys(error.keyPattern || {});
+  if (campos.includes("usuarioCellvi")) {
+    return "Ya existe un tercero con ese Usuario Cellvi.";
+  }
+  return "Ya existe un tercero con esa identificación en esta empresa.";
+}
+
 // Helper de roles inline
 function getRoles(req) {
   const rolesNormalized = (req.user?.roles || []).map((r) =>
@@ -124,10 +134,9 @@ exports.create = async (req, res) => {
     res.status(201).json({ success: true, data: tercero });
   } catch (error) {
     if (error.code === 11000) {
-      return res.status(409).json({
-        success: false,
-        message: "Ya existe un tercero con esa identificación en esta empresa.",
-      });
+      return res
+        .status(409)
+        .json({ success: false, message: mensajeDuplicado(error) });
     }
     logger.error(`Error creando tercero: ${error.message}`);
     res.status(400).json({ success: false, message: error.message });
@@ -223,13 +232,14 @@ exports.getList = async (req, res) => {
       query.$or = [
         { nombres: new RegExp(search, "i") },
         { apellidos: new RegExp(search, "i") },
+        { razonSocial: new RegExp(search, "i") },
         { identificacion: new RegExp(search, "i") },
       ];
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const terceros = await Tercero.find(query)
-      .select("nombres apellidos identificacion tipoId roles")
+      .select("nombres apellidos razonSocial identificacion tipoId roles")
       .limit(parseInt(limit))
       .skip(skip)
       .sort({ nombres: 1 })
@@ -383,6 +393,11 @@ exports.update = async (req, res) => {
 
     res.json({ success: true, data: tercero });
   } catch (error) {
+    if (error.code === 11000) {
+      return res
+        .status(409)
+        .json({ success: false, message: mensajeDuplicado(error) });
+    }
     logger.error(`Error actualizando tercero: ${error.message}`);
     res.status(400).json({ success: false, message: error.message });
   }

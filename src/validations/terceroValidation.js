@@ -1,18 +1,55 @@
 const Joi = require("joi");
 
+// Perfiles que inician sesión en la plataforma y por tanto deben quedar
+// enlazados a un usuario de Cellvi. El API no lo exige para CLIENTE ni
+// PROPIETARIO porque el módulo FUEC crea contratantes sin usuario; la regla de
+// negocio más estricta ("todos menos el proveedor") la aplica el formulario de
+// Usuarios del front PESV (requiereUsuarioCellvi en RolesMultiSelect.tsx).
+const ROLES_CON_ACCESO_CELLVI = ["CONDUCTOR", "ADMINISTRATIVO", "MECANICO"];
+
+const MSG_USUARIO_CELLVI =
+  "Usuario Cellvi es obligatorio para conductores, administrativos, mecánicos y roles de acceso al sistema";
+
+const USUARIO_CELLVI_OBLIGATORIO = Joi.string()
+  .trim()
+  .invalid("", null)
+  .required()
+  .messages({
+    "any.required": MSG_USUARIO_CELLVI,
+    "any.invalid": MSG_USUARIO_CELLVI,
+    "string.empty": MSG_USUARIO_CELLVI,
+  });
+
 const createTercero = Joi.object({
   // Identificación Base (SIEMPRE PERSONAL)
   identificacion: Joi.string().required().trim().messages({
     "string.empty": "La identificación es obligatoria",
   }),
 
-  // TipoId: Si tiene empresa, NO puede ser NIT
+  // Tipo de documento: NIT para persona jurídica (empresa cliente/proveedor),
+  // los demás para persona natural.
   tipoId: Joi.string()
     .valid("CC", "NIT", "CE", "PEP", "PASAPORTE")
     .required()
     .messages({ "any.only": "Tipo de ID inválido" }),
 
-  usuarioCellvi: Joi.string().trim().allow("", null),
+  // Enlace con el login de Cellvi. Solo es obligatorio si el tercero tiene un
+  // perfil que inicia sesión (ROLES_CON_ACCESO_CELLVI) o un rol de acceso
+  // local (rolesSistema). Si llega vacío, el modelo lo deja sin definir para
+  // que el índice único sparse no choque entre terceros sin usuario.
+  usuarioCellvi: Joi.string()
+    .trim()
+    .allow("", null)
+    .when("roles", {
+      is: Joi.array()
+        .has(Joi.valid(...ROLES_CON_ACCESO_CELLVI))
+        .required(),
+      then: USUARIO_CELLVI_OBLIGATORIO,
+    })
+    .when("rolesSistema", {
+      is: Joi.array().min(1).required(),
+      then: USUARIO_CELLVI_OBLIGATORIO,
+    }),
 
   empresa: Joi.string().allow(null), // ObjectId como string
 
@@ -21,7 +58,8 @@ const createTercero = Joi.object({
   nombres: Joi.string()
     .trim()
     .when("tipoId", {
-      is: Joi.valid("CC", "CE", "PEP", "PASAPORTE"),
+      // .required(): si tipoId no viene (update parcial) no se exigen
+      is: Joi.valid("CC", "CE", "PEP", "PASAPORTE").required(),
       then: Joi.required(),
       otherwise: Joi.optional().allow("", null),
     })
@@ -32,7 +70,8 @@ const createTercero = Joi.object({
   apellidos: Joi.string()
     .trim()
     .when("tipoId", {
-      is: Joi.valid("CC", "CE", "PEP", "PASAPORTE"),
+      // .required(): si tipoId no viene (update parcial) no se exigen
+      is: Joi.valid("CC", "CE", "PEP", "PASAPORTE").required(),
       then: Joi.required(),
       otherwise: Joi.optional().allow("", null),
     })
@@ -120,4 +159,5 @@ const updateTercero = createTercero.fork(
 module.exports = {
   createTercero,
   updateTercero,
+  ROLES_CON_ACCESO_CELLVI,
 };
