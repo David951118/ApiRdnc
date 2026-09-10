@@ -135,6 +135,7 @@ app.use("/api/operacion", authenticate, require("./routes/operacion"));
 app.use("/api/telemetria", authenticate, require("./routes/telemetria"));
 app.use("/api/auditoria", authenticate, require("./routes/auditoria"));
 app.use("/api/expedicion", authenticate, require("./routes/expedicion"));
+app.use("/api/multas", authenticate, require("./routes/multas"));
 app.use("/api/gps", require("./routes/gps"));
 
 // 404 Handler

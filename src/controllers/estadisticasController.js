@@ -426,6 +426,7 @@ exports.getDocumentosResumen = async (req, res) => {
 const CargaCombustible = require("../models/CargaCombustible");
 const OrdenTrabajo = require("../models/OrdenTrabajo");
 const KilometrajeDiario = require("../models/KilometrajeDiario");
+const Multa = require("../models/Multa");
 const { rangoDias } = require("../utils/rangoFechas");
 
 /**
@@ -465,7 +466,7 @@ exports.getVehiculoResumen = async (req, res) => {
 
     const rango = rangoDias(desde, hasta);
 
-    const [preops, tanqueos, ordenes, snapshots] = await Promise.all([
+    const [preops, tanqueos, ordenes, snapshots, multas] = await Promise.all([
       Preoperacional.find({ vehiculo: vehiculoId, deletedAt: null, fecha: rango })
         .select("fecha estadoGeneral kilometraje novedades conductor")
         .populate("conductor", "nombres apellidos")
@@ -491,7 +492,24 @@ exports.getVehiculoResumen = async (req, res) => {
         .sort({ fecha: 1 })
         .select("fecha kilometraje fuente")
         .lean(),
+      Multa.find({
+        vehiculo: vehiculoId,
+        deletedAt: null,
+        estado: { $ne: "ANULADA" },
+        fecha: rango,
+      })
+        .select("numero fecha codigoInfraccion descripcion autoridad valor costoTotal estado responsable inmovilizacion.aplica inmovilizacion.estado inmovilizacion.fechaInicio inmovilizacion.fechaLevantamiento conductor conductorNoRegistrado")
+        .populate("conductor", "nombres apellidos")
+        .sort({ fecha: 1 })
+        .lean(),
     ]);
+
+    // ── Multas ──
+    const costoMultas = multas.reduce((s, m) => s + (m.costoTotal || 0), 0);
+    const multasPendientes = multas.filter((m) =>
+      ["PENDIENTE", "IMPUGNADA"].includes(m.estado),
+    ).length;
+    const inmovilizaciones = multas.filter((m) => m.inmovilizacion?.aplica).length;
 
     // ── Preoperativas ──
     const porEstado = { APROBADO: 0, NOVEDAD: 0, RECHAZADO: 0 };
@@ -580,14 +598,22 @@ exports.getVehiculoResumen = async (req, res) => {
           costoTotal: costoMantenimiento,
           detalle: ordenes,
         },
+        multas: {
+          total: multas.length,
+          pendientes: multasPendientes,
+          inmovilizaciones,
+          costoTotal: costoMultas,
+          detalle: multas,
+        },
         kilometraje,
         costos: {
           combustible: costoCombustible,
           mantenimiento: costoMantenimiento,
-          total: costoCombustible + costoMantenimiento,
+          multas: costoMultas,
+          total: costoCombustible + costoMantenimiento + costoMultas,
           costoPorKm:
             kilometraje.recorridoKm > 0
-              ? Math.round(((costoCombustible + costoMantenimiento) / kilometraje.recorridoKm) * 100) / 100
+              ? Math.round(((costoCombustible + costoMantenimiento + costoMultas) / kilometraje.recorridoKm) * 100) / 100
               : null,
         },
       },

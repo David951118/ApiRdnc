@@ -49,7 +49,13 @@ const createVehiculo = Joi.object({
     .message("ID de empresa afiliadora inválido"),
   fechaAfiliacion: Joi.date(),
 
-  estado: Joi.string().valid("ACTIVO", "MANTENIMIENTO", "INACTIVO", "RETIRADO"),
+  estado: Joi.string().valid(
+    "ACTIVO",
+    "MANTENIMIENTO",
+    "INACTIVO",
+    "RETIRADO",
+    "INMOVILIZADO",
+  ),
   // Tope de plausibilidad: evita que un tecleo (ej. 6565656) quede como
   // kilometraje del vehículo y desalinee los planes de mantenimiento.
   kilometrajeActual: Joi.number()

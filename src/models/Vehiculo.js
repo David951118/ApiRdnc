@@ -52,9 +52,11 @@ const VehiculoSchema = new Schema(
     fechaAfiliacion: Date,
 
     // Estado Operativo
+    // INMOVILIZADO: retenido por la autoridad a raíz de una multa (ver
+    // models/Multa.js). Sale de operación hasta que se levante la inmovilización.
     estado: {
       type: String,
-      enum: ["ACTIVO", "MANTENIMIENTO", "INACTIVO", "RETIRADO"],
+      enum: ["ACTIVO", "MANTENIMIENTO", "INACTIVO", "RETIRADO", "INMOVILIZADO"],
       default: "ACTIVO",
     },
     kilometrajeActual: Number, // Sync con GPSCellvi

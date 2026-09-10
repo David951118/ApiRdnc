@@ -4,6 +4,7 @@ const OrdenTrabajo = require("../models/OrdenTrabajo");
 const CargaCombustible = require("../models/CargaCombustible");
 const Viaje = require("../models/Viaje");
 const Preoperacional = require("../models/Preoperacional");
+const Multa = require("../models/Multa");
 const { rangoDias } = require("../utils/rangoFechas");
 
 /**
@@ -131,12 +132,52 @@ async function combustibleYKmPorVehiculo({ empresaId, desde, hasta }) {
 }
 
 /**
- * Ranking de vehículos por costo total (mantenimiento + combustible) y costo/km.
+ * Multas por vehículo en el periodo (por fecha de la infracción). Se excluyen
+ * las anuladas. costoMultas = valor + grúa + patios.
+ * @returns Map<vehiculoId, { costoMultas, multas, inmovilizaciones }>
+ */
+async function multasPorVehiculo({ empresaId, desde, hasta }) {
+  const match = { deletedAt: null, estado: { $ne: "ANULADA" } };
+  if (empresaId) match.empresa = toObjectId(empresaId);
+  const r = rangoFechas(desde, hasta);
+  if (r) match.fecha = r;
+
+  const datos = await Multa.aggregate([
+    { $match: match },
+    {
+      $group: {
+        _id: "$vehiculo",
+        costoMultas: { $sum: "$costoTotal" },
+        valorMultas: { $sum: "$valor" },
+        multas: { $sum: 1 },
+        inmovilizaciones: {
+          $sum: { $cond: ["$inmovilizacion.aplica", 1, 0] },
+        },
+      },
+    },
+  ]);
+
+  const mapa = new Map();
+  for (const d of datos) {
+    mapa.set(d._id.toString(), {
+      costoMultas: d.costoMultas,
+      valorMultas: d.valorMultas,
+      multas: d.multas,
+      inmovilizaciones: d.inmovilizaciones,
+    });
+  }
+  return mapa;
+}
+
+/**
+ * Ranking de vehículos por costo total (mantenimiento + combustible + multas)
+ * y costo/km.
  */
 async function rankingVehiculos(opts = {}) {
-  const [mant, comb] = await Promise.all([
+  const [mant, comb, mul] = await Promise.all([
     costosMantenimientoPorVehiculo(opts),
     combustibleYKmPorVehiculo(opts),
+    multasPorVehiculo(opts),
   ]);
 
   const filtroVeh = { deletedAt: null };
@@ -156,7 +197,13 @@ async function rankingVehiculos(opts = {}) {
       correctivos: 0,
     };
     const c = comb.get(id) || { costoCombustible: 0, kmRecorridos: 0 };
-    const costoTotal = m.costoTotal + c.costoCombustible;
+    const u = mul.get(id) || {
+      costoMultas: 0,
+      valorMultas: 0,
+      multas: 0,
+      inmovilizaciones: 0,
+    };
+    const costoTotal = m.costoTotal + c.costoCombustible + u.costoMultas;
     const costoPorKm =
       c.kmRecorridos > 0
         ? Math.round((costoTotal / c.kmRecorridos) * 100) / 100
@@ -172,6 +219,9 @@ async function rankingVehiculos(opts = {}) {
       costoManoDeObra: m.costoManoDeObra,
       costoRepuestos: m.costoRepuestos,
       costoCombustible: c.costoCombustible,
+      costoMultas: u.costoMultas,
+      multas: u.multas,
+      inmovilizaciones: u.inmovilizaciones,
       costoTotal,
       kmRecorridos: c.kmRecorridos,
       costoPorKm,
@@ -194,11 +244,13 @@ async function kpisGerenciales(opts = {}) {
   // Disponibilidad de flota
   const filtroVeh = { deletedAt: null };
   if (opts.empresaId) filtroVeh.empresaAfiliadora = toObjectId(opts.empresaId);
-  const [totalFlota, enMantenimiento] = await Promise.all([
+  const [totalFlota, enMantenimiento, inmovilizados] = await Promise.all([
     Vehiculo.countDocuments(filtroVeh),
     Vehiculo.countDocuments({ ...filtroVeh, estado: "MANTENIMIENTO" }),
+    Vehiculo.countDocuments({ ...filtroVeh, estado: "INMOVILIZADO" }),
   ]);
-  const disponibles = totalFlota - enMantenimiento;
+  // Un vehículo inmovilizado por la autoridad tampoco está disponible
+  const disponibles = totalFlota - enMantenimiento - inmovilizados;
   const disponibilidad =
     totalFlota > 0 ? Math.round((disponibles / totalFlota) * 1000) / 10 : null;
 
@@ -211,18 +263,46 @@ async function kpisGerenciales(opts = {}) {
 
   // Costo total y costo por km global
   const costoTotalFlota = ranking.reduce((s, v) => s + v.costoTotal, 0);
+  const costoMantenimientoFlota = ranking.reduce((s, v) => s + v.costoMantenimiento, 0);
+  const costoCombustibleFlota = ranking.reduce((s, v) => s + v.costoCombustible, 0);
+  const costoMultasFlota = ranking.reduce((s, v) => s + v.costoMultas, 0);
   const kmTotalFlota = ranking.reduce((s, v) => s + v.kmRecorridos, 0);
   const costoPorKmGlobal =
     kmTotalFlota > 0
       ? Math.round((costoTotalFlota / kmTotalFlota) * 100) / 100
       : null;
 
+  // Multas del periodo (conteo por estado) para el tablero
+  const matchMultas = { deletedAt: null };
+  if (opts.empresaId) matchMultas.empresa = toObjectId(opts.empresaId);
+  const rm = rangoFechas(opts.desde, opts.hasta);
+  if (rm) matchMultas.fecha = rm;
+  const multasEstado = await Multa.aggregate([
+    { $match: matchMultas },
+    { $group: { _id: "$estado", cantidad: { $sum: 1 }, valor: { $sum: "$valor" } } },
+  ]);
+  const me = Object.fromEntries(multasEstado.map((x) => [x._id, x]));
+  const totalMultas = ranking.reduce((s, v) => s + v.multas, 0);
+  const totalInmovilizaciones = ranking.reduce((s, v) => s + v.inmovilizaciones, 0);
+
   return {
     flota: {
       total: totalFlota,
       disponibles,
       enMantenimiento,
+      inmovilizados,
       disponibilidad, // %
+    },
+    multas: {
+      total: totalMultas, // sin anuladas
+      pendientes: me.PENDIENTE?.cantidad || 0,
+      impugnadas: me.IMPUGNADA?.cantidad || 0,
+      pagadas: me.PAGADA?.cantidad || 0,
+      anuladas: me.ANULADA?.cantidad || 0,
+      valorPorPagar: (me.PENDIENTE?.valor || 0) + (me.IMPUGNADA?.valor || 0),
+      costoTotal: costoMultasFlota, // valor + grúa + patios
+      inmovilizaciones: totalInmovilizaciones,
+      vehiculosInmovilizados: inmovilizados,
     },
     mantenimiento: {
       preventivos: totalPreventivos,
@@ -233,6 +313,9 @@ async function kpisGerenciales(opts = {}) {
     },
     costos: {
       costoTotalFlota,
+      costoMantenimientoFlota,
+      costoCombustibleFlota,
+      costoMultasFlota,
       kmTotalFlota,
       costoPorKmGlobal, // $/km
     },
@@ -245,4 +328,5 @@ module.exports = {
   rankingVehiculos,
   costosMantenimientoPorVehiculo,
   combustibleYKmPorVehiculo,
+  multasPorVehiculo,
 };

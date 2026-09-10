@@ -285,6 +285,17 @@ exports.create = async (req, res) => {
       });
     }
 
+    // Vehículo retenido por la autoridad (multa con inmovilización vigente):
+    // está fuera de operación hasta que administración levante la inmovilización.
+    if (vehiculo.estado === "INMOVILIZADO") {
+      return res.status(409).json({
+        success: false,
+        code: "VEHICULO_INMOVILIZADO",
+        message:
+          "El vehículo está inmovilizado por una multa. No puede operar hasta que se suba la corrección y administración levante la inmovilización.",
+      });
+    }
+
     // Si el frontend marca creadoPorAdmin, verificar que el usuario autenticado
     // tenga rol de administrador. No confiamos en creadoPorUserId del body.
     const rolesNormalized = (req.user?.roles || []).map((r) =>
@@ -377,6 +388,7 @@ exports.getAll = async (req, res) => {
   try {
     const {
       vehiculoId,
+      placa,
       conductorId,
       estadoGeneral,
       fechaDesde,
@@ -385,6 +397,11 @@ exports.getAll = async (req, res) => {
       limit = 20,
       includeDeleted = false,
     } = req.query;
+
+    // Historial por vehículo / filtros del front: se permite pedir hasta 1000
+    // registros por página (antes el tope efectivo eran los 20 por defecto).
+    const limitNum = Math.min(1000, Math.max(1, parseInt(limit) || 20));
+    const pageNum = Math.max(1, parseInt(page) || 1);
 
     const query = {};
 
@@ -396,7 +413,7 @@ exports.getAll = async (req, res) => {
       return res.json({
         success: true,
         data: [],
-        pagination: { page: 1, limit: parseInt(limit), total: 0, pages: 0 },
+        pagination: { page: 1, limit: limitNum, total: 0, pages: 0 },
       });
     }
 
@@ -404,20 +421,51 @@ exports.getAll = async (req, res) => {
     if (conductorId) query.conductor = conductorId;
     if (estadoGeneral) query.estadoGeneral = estadoGeneral;
 
-    if (fechaDesde || fechaHasta) {
-      query.fecha = {};
-      if (fechaDesde) query.fecha.$gte = new Date(fechaDesde);
-      if (fechaHasta) query.fecha.$lte = new Date(fechaHasta);
+    // Filtro por placa (coincidencia parcial, sin distinguir mayúsculas).
+    // Se intersecta con el scope del usuario para no abrir vehículos ajenos.
+    if (placa && String(placa).trim()) {
+      const regex = new RegExp(
+        String(placa).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+        "i",
+      );
+      const vehiculosPlaca = await Vehiculo.find({ placa: regex })
+        .select("_id")
+        .lean();
+      const idsPlaca = vehiculosPlaca.map((v) => v._id.toString());
+      if (query.vehiculo && !query.vehiculo.$in) {
+        // vehiculoId explícito: debe coincidir con la placa
+        if (!idsPlaca.includes(query.vehiculo.toString())) {
+          return res.json({
+            success: true,
+            data: [],
+            pagination: { page: 1, limit: limitNum, total: 0, pages: 0 },
+          });
+        }
+      } else {
+        const permitidos = query.vehiculo?.$in
+          ? idsPlaca.filter((id) =>
+              query.vehiculo.$in.some((x) => x.toString() === id),
+            )
+          : idsPlaca;
+        query.vehiculo = {
+          $in: permitidos.map((id) => new mongoose.Types.ObjectId(id)),
+        };
+      }
     }
+
+    // Días sueltos ("2026-09-01") anclados al calendario colombiano para que
+    // el "hasta" incluya ese día completo (ver utils/rangoFechas.js).
+    const rango = rangoDias(fechaDesde, fechaHasta);
+    if (rango) query.fecha = rango;
 
     if (!includeDeleted || includeDeleted === "false") {
       query.deletedAt = null;
     }
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
     const list = await Preoperacional.find(query)
       .sort({ fecha: -1 })
-      .limit(parseInt(limit))
+      .limit(limitNum)
       .skip(skip)
       .populate("vehiculo", "placa numeroInterno")
       .populate("conductor", "nombres apellidos")
@@ -429,10 +477,10 @@ exports.getAll = async (req, res) => {
       success: true,
       data: list,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: pageNum,
+        limit: limitNum,
         total,
-        pages: Math.ceil(total / parseInt(limit)),
+        pages: Math.ceil(total / limitNum),
       },
     });
   } catch (error) {

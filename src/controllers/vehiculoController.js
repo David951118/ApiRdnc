@@ -4,6 +4,7 @@ const Documento = require("../models/Documento");
 const Preoperacional = require("../models/Preoperacional");
 const ContratoFuec = require("../models/ContratoFUEC");
 const OrdenTrabajo = require("../models/OrdenTrabajo");
+const Multa = require("../models/Multa");
 const { getVehicleScope } = require("../utils/dataScope");
 const { getVehiculoScope } = require("../services/vehiculoAccessService");
 const { deleteDocumentosWithS3, cleanEntidadesAsociadas } = require("../helpers/cascadeDelete");
@@ -296,6 +297,34 @@ exports.update = async (req, res) => {
       return res
         .status(404)
         .json({ success: false, message: "Vehículo no encontrado" });
+
+    // El estado INMOVILIZADO lo gobierna el módulo de multas: no se pone ni se
+    // quita a mano mientras exista una inmovilización vigente (se levanta desde
+    // la multa para que quede la corrección y la trazabilidad).
+    if (req.body.estado && req.body.estado !== vehiculo.estado) {
+      if (req.body.estado === "INMOVILIZADO") {
+        return res.status(409).json({
+          success: false,
+          message:
+            "La inmovilización se registra desde el módulo de Multas (multa con vehículo inmovilizado).",
+        });
+      }
+      if (vehiculo.estado === "INMOVILIZADO") {
+        const activa = await Multa.exists({
+          vehiculo: vehiculo._id,
+          deletedAt: null,
+          estado: { $ne: "ANULADA" },
+          "inmovilizacion.estado": { $in: Multa.INMOVILIZACION_ACTIVA },
+        });
+        if (activa) {
+          return res.status(409).json({
+            success: false,
+            message:
+              "El vehículo está inmovilizado por una multa. Levante la inmovilización desde el módulo de Multas.",
+          });
+        }
+      }
+    }
 
     const kmAnterior = vehiculo.kilometrajeActual;
     Object.assign(vehiculo, req.body);

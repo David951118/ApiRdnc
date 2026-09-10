@@ -66,6 +66,17 @@ exports.crearViaje = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Vehículo no encontrado" });
 
+    // Retenido por la autoridad (multa con inmovilización vigente): no se
+    // programan viajes hasta que se levante la inmovilización.
+    if (vehiculo.estado === "INMOVILIZADO") {
+      return res.status(409).json({
+        success: false,
+        code: "VEHICULO_INMOVILIZADO",
+        message:
+          "El vehículo está inmovilizado por una multa y no puede ser asignado a viajes hasta levantar la inmovilización.",
+      });
+    }
+
     const viaje = new Viaje({
       ...req.body,
       placa: vehiculo.placa,
