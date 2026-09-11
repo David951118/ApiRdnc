@@ -45,12 +45,19 @@ const createViaje = Joi.object({
   observaciones: Joi.string().allow("", null),
 });
 
+// Editar un viaje. El vehículo NUNCA se cambia al editar (fija placa, empresa y la
+// serie de kilometraje). Los datos de ejecución (fechaSalida, fechaLlegada, kmFin)
+// solo se aceptan según el estado del viaje; el controlador lo verifica.
 const updateViaje = Joi.object({
+  conductor: mongoId,
   ruta: mongoId.allow(null),
   origen: Joi.string().allow("", null),
   destino: Joi.string().allow("", null),
   fechaProgramada: Joi.date().allow(null),
+  fechaSalida: Joi.date().allow(null),
+  fechaLlegada: Joi.date().allow(null),
   kmInicio: Joi.number().min(0).allow(null),
+  kmFin: Joi.number().min(0).allow(null),
   carga,
   entregas: Joi.array().items(entrega),
   incidencias: Joi.array().items(incidencia),

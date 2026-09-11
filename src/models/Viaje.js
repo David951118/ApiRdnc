@@ -123,17 +123,23 @@ ViajeSchema.pre("save", async function () {
     this.numero = `VJ-${anio}-${String(seq).padStart(4, "0")}`;
   }
 
-  // Km recorrido
+  // Km recorrido. Si falta alguno de los dos extremos el valor calculado deja
+  // de ser válido (p. ej. al corregir un viaje finalizado y vaciar el km
+  // inicial), así que se limpia en vez de conservar un dato viejo.
   if (this.kmInicio != null && this.kmFin != null) {
     this.kmRecorrido = Math.max(0, this.kmFin - this.kmInicio);
+  } else {
+    this.kmRecorrido = undefined;
   }
 
-  // Duración
+  // Duración (misma regla)
   if (this.fechaSalida && this.fechaLlegada) {
     this.duracionMinutos = Math.max(
       0,
       Math.round((this.fechaLlegada - this.fechaSalida) / 60000),
     );
+  } else {
+    this.duracionMinutos = undefined;
   }
 });
 
