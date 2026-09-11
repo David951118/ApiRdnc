@@ -48,8 +48,11 @@ const fmtFechaHoraCo = new Intl.DateTimeFormat("es-CO", {
   dateStyle: "short",
   timeStyle: "short",
 });
+// Fechas "solo día" (fecha programada): el front las envía como "YYYY-MM-DD" y
+// quedan guardadas como medianoche UTC, así que se muestran por su día UTC
+// (en hora Bogotá saldrían un día antes).
 const fmtFechaCo = new Intl.DateTimeFormat("es-CO", {
-  timeZone: "America/Bogota",
+  timeZone: "UTC",
   dateStyle: "short",
 });
 function fechaTexto(valor, conHora) {
@@ -488,6 +491,13 @@ exports.iniciarViaje = async (req, res) => {
       });
     }
 
+    if (req.body.kmInicio != null && req.body.kmInicio > KM_MAXIMO_PLAUSIBLE) {
+      return res.status(400).json({
+        success: false,
+        message: `El kilometraje inicial (${req.body.kmInicio}) supera el máximo razonable (${KM_MAXIMO_PLAUSIBLE.toLocaleString("es-CO")} km). Revise la digitación.`,
+      });
+    }
+
     if (req.body.kmInicio != null) viaje.kmInicio = req.body.kmInicio;
     viaje.estado = "EN_CURSO";
     viaje.fechaSalida = req.body.fechaSalida || new Date();
@@ -519,6 +529,15 @@ exports.finalizarViaje = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Debe indicar el kilometraje final del viaje",
+      });
+    }
+
+    // Un km imposible (p. ej. un cero de más) inflaría el odómetro del vehículo
+    // y dispararía mantenimientos absurdos: se rechaza en el cierre, no después.
+    if (req.body.kmFin > KM_MAXIMO_PLAUSIBLE) {
+      return res.status(400).json({
+        success: false,
+        message: `El kilometraje final (${req.body.kmFin}) supera el máximo razonable (${KM_MAXIMO_PLAUSIBLE.toLocaleString("es-CO")} km). Revise la digitación.`,
       });
     }
 

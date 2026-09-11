@@ -1,9 +1,11 @@
+const mongoose = require("mongoose");
 const Empresa = require("../models/Empresa");
 const Vehiculo = require("../models/Vehiculo");
 const Tercero = require("../models/Tercero");
 const ContratoFuec = require("../models/ContratoFUEC");
 const Preoperacional = require("../models/Preoperacional");
 const Documento = require("../models/Documento");
+const Viaje = require("../models/Viaje");
 const kpiService = require("../services/kpiService");
 const logger = require("../config/logger");
 
@@ -323,6 +325,8 @@ exports.getKpisGerenciales = async (req, res) => {
       empresaId,
       desde: req.query.desde,
       hasta: req.query.hasta,
+      // VIAJES (default) u ODOMETRO: con qué km se calcula el costo por km
+      fuenteKm: req.query.fuenteKm,
     });
 
     res.json({ success: true, data, generadoEn: new Date().toISOString() });
@@ -442,6 +446,12 @@ exports.getVehiculoResumen = async (req, res) => {
   try {
     const { vehiculoId } = req.params;
     let { desde, hasta } = req.query;
+    // Km con que se calcula el costo por km del vehículo: ODOMETRO (default,
+    // recorrido real por snapshots diarios) o VIAJES (km de viajes finalizados).
+    const fuenteKm =
+      String(req.query.fuenteKm || "ODOMETRO").toUpperCase() === "VIAJES"
+        ? "VIAJES"
+        : "ODOMETRO";
 
     // Por defecto: mes corrido (día 1 del mes actual → hoy, día Colombia)
     const hoyCo = new Intl.DateTimeFormat("en-CA", {
@@ -466,7 +476,7 @@ exports.getVehiculoResumen = async (req, res) => {
 
     const rango = rangoDias(desde, hasta);
 
-    const [preops, tanqueos, ordenes, snapshots, multas] = await Promise.all([
+    const [preops, tanqueos, ordenes, snapshots, multas, viajesAgg] = await Promise.all([
       Preoperacional.find({ vehiculo: vehiculoId, deletedAt: null, fecha: rango })
         .select("fecha estadoGeneral kilometraje novedades conductor")
         .populate("conductor", "nombres apellidos")
@@ -502,6 +512,19 @@ exports.getVehiculoResumen = async (req, res) => {
         .populate("conductor", "nombres apellidos")
         .sort({ fecha: 1 })
         .lean(),
+      // Km de viajes finalizados en el rango (por fecha de llegada), misma
+      // regla que el ranking de KPIs gerenciales.
+      Viaje.aggregate([
+        {
+          $match: {
+            vehiculo: new mongoose.Types.ObjectId(vehiculoId),
+            estado: "FINALIZADO",
+            deletedAt: null,
+            fechaLlegada: rango,
+          },
+        },
+        { $group: { _id: null, km: { $sum: "$kmRecorrido" }, n: { $sum: 1 } } },
+      ]),
     ]);
 
     // ── Multas ──
@@ -558,11 +581,19 @@ exports.getVehiculoResumen = async (req, res) => {
       const delta = snapshots[i].kilometraje - snapshots[i - 1].kilometraje;
       if (delta > 0) recorridoKm += delta;
     }
+    const kmViajes = Math.round(viajesAgg[0]?.km || 0);
+    const viajesFinalizados = viajesAgg[0]?.n || 0;
+    const kmSeleccionado =
+      fuenteKm === "VIAJES" ? kmViajes : Math.round(recorridoKm);
     const kilometraje = {
       dias: snapshots.length,
       kmInicio: snapshots.length ? snapshots[0].kilometraje : null,
       kmFin: snapshots.length ? snapshots[snapshots.length - 1].kilometraje : null,
-      recorridoKm: Math.round(recorridoKm),
+      recorridoKm: Math.round(recorridoKm), // odómetro (snapshots diarios)
+      kmViajes, // viajes finalizados del rango
+      viajesFinalizados,
+      fuente: fuenteKm,
+      kmSeleccionado, // el que se usa para el costo por km
       snapshots,
       nota:
         snapshots.length < 2
@@ -612,8 +643,8 @@ exports.getVehiculoResumen = async (req, res) => {
           multas: costoMultas,
           total: costoCombustible + costoMantenimiento + costoMultas,
           costoPorKm:
-            kilometraje.recorridoKm > 0
-              ? Math.round(((costoCombustible + costoMantenimiento + costoMultas) / kilometraje.recorridoKm) * 100) / 100
+            kmSeleccionado > 0
+              ? Math.round(((costoCombustible + costoMantenimiento + costoMultas) / kmSeleccionado) * 100) / 100
               : null,
         },
       },

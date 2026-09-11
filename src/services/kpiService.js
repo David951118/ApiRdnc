@@ -5,7 +5,22 @@ const CargaCombustible = require("../models/CargaCombustible");
 const Viaje = require("../models/Viaje");
 const Preoperacional = require("../models/Preoperacional");
 const Multa = require("../models/Multa");
+const KilometrajeDiario = require("../models/KilometrajeDiario");
 const { rangoDias } = require("../utils/rangoFechas");
+
+/**
+ * Fuente del kilometraje con que se calcula el costo por km:
+ *   - VIAJES   (default): km recorridos de los viajes FINALIZADOS del periodo
+ *                (si un vehículo no tiene viajes, se estima por combustible).
+ *   - ODOMETRO: recorrido REAL según los snapshots diarios del odómetro
+ *                (KilometrajeDiario); cubre lo que el vehículo se mueve por
+ *                fuera de los viajes registrados.
+ */
+function normalizarFuenteKm(valor) {
+  return String(valor || "VIAJES").toUpperCase() === "ODOMETRO"
+    ? "ODOMETRO"
+    : "VIAJES";
+}
 
 /**
  * Servicio de KPIs gerenciales (requerimiento d).
@@ -73,10 +88,63 @@ async function costosMantenimientoPorVehiculo({ empresaId, desde, hasta }) {
 }
 
 /**
- * Costos de combustible y km recorridos por vehículo en el periodo.
- * @returns Map<vehiculoId, { costoCombustible, kmRecorridos }>
+ * Km recorridos REALES por vehículo según el odómetro: suma de los incrementos
+ * positivos entre snapshots diarios consecutivos dentro del rango (misma regla
+ * que el análisis por vehículo y /telemetria/recorrido-flota). Los días se
+ * comparan como texto "YYYY-MM-DD" (así los guarda el worker).
+ * @returns Map<vehiculoId, kmOdometro>
  */
-async function combustibleYKmPorVehiculo({ empresaId, desde, hasta }) {
+async function kmOdometroPorVehiculo({ empresaId, desde, hasta }) {
+  const match = {};
+  const d = desde ? String(desde).slice(0, 10) : null;
+  const h = hasta ? String(hasta).slice(0, 10) : null;
+  if (d || h) {
+    match.fecha = {};
+    if (d) match.fecha.$gte = d;
+    if (h) match.fecha.$lte = h;
+  }
+  if (empresaId) {
+    const ids = await Vehiculo.find({
+      empresaAfiliadora: toObjectId(empresaId),
+      deletedAt: null,
+    })
+      .select("_id")
+      .lean();
+    match.vehiculo = { $in: ids.map((v) => v._id) };
+  }
+
+  const snapshots = await KilometrajeDiario.find(match)
+    .sort({ vehiculo: 1, fecha: 1 })
+    .select("vehiculo fecha kilometraje")
+    .lean();
+
+  const mapa = new Map();
+  let vehiculoPrev = null;
+  let kmPrev = null;
+  for (const s of snapshots) {
+    const key = String(s.vehiculo);
+    if (key !== vehiculoPrev) {
+      vehiculoPrev = key;
+      kmPrev = s.kilometraje;
+      if (!mapa.has(key)) mapa.set(key, 0);
+      continue;
+    }
+    const delta = s.kilometraje - kmPrev;
+    if (delta > 0) mapa.set(key, mapa.get(key) + delta);
+    kmPrev = s.kilometraje;
+  }
+  for (const [key, km] of mapa) mapa.set(key, Math.round(km));
+  return mapa;
+}
+
+/**
+ * Costos de combustible y km recorridos por vehículo en el periodo.
+ * `kmRecorridos` sale de la fuente elegida (ver normalizarFuenteKm); se
+ * devuelven además `kmViajes` y `kmOdometro` para poder compararlos.
+ * @returns Map<vehiculoId, { costoCombustible, kmRecorridos, kmViajes, kmOdometro }>
+ */
+async function combustibleYKmPorVehiculo({ empresaId, desde, hasta, fuenteKm }) {
+  const fuente = normalizarFuenteKm(fuenteKm);
   // Combustible
   const matchComb = { deletedAt: null };
   if (empresaId) matchComb.empresa = toObjectId(empresaId);
@@ -109,24 +177,43 @@ async function combustibleYKmPorVehiculo({ empresaId, desde, hasta }) {
   const rv = rangoFechas(desde, hasta);
   if (rv) matchViaje.fechaLlegada = rv;
 
-  const viajes = await Viaje.aggregate([
-    { $match: matchViaje },
-    { $group: { _id: "$vehiculo", kmViajes: { $sum: "$kmRecorrido" } } },
+  const [viajes, odometro] = await Promise.all([
+    Viaje.aggregate([
+      { $match: matchViaje },
+      { $group: { _id: "$vehiculo", kmViajes: { $sum: "$kmRecorrido" } } },
+    ]),
+    kmOdometroPorVehiculo({ empresaId, desde, hasta }),
   ]);
 
   const mapa = new Map();
+  const entrada = (key) => {
+    if (!mapa.has(key)) {
+      mapa.set(key, {
+        costoCombustible: 0,
+        kmCombustible: 0,
+        kmViajes: 0,
+        kmOdometro: 0,
+        kmRecorridos: 0,
+      });
+    }
+    return mapa.get(key);
+  };
   for (const c of combustible) {
-    mapa.set(c._id.toString(), {
-      costoCombustible: c.costoCombustible,
-      kmRecorridos: Math.round(c.kmCombustible),
-    });
+    const e = entrada(c._id.toString());
+    e.costoCombustible = c.costoCombustible;
+    e.kmCombustible = Math.round(c.kmCombustible);
   }
-  // Preferir km de viajes cuando exista
-  for (const v of viajes) {
-    const key = v._id.toString();
-    const actual = mapa.get(key) || { costoCombustible: 0, kmRecorridos: 0 };
-    if (v.kmViajes > 0) actual.kmRecorridos = v.kmViajes;
-    mapa.set(key, actual);
+  for (const v of viajes) entrada(v._id.toString()).kmViajes = v.kmViajes || 0;
+  for (const [key, km] of odometro) entrada(key).kmOdometro = km;
+
+  for (const e of mapa.values()) {
+    if (fuente === "ODOMETRO") {
+      e.kmRecorridos = e.kmOdometro;
+    } else {
+      // Preferir km de viajes cuando exista; si no, la estimación por combustible
+      e.kmRecorridos = e.kmViajes > 0 ? e.kmViajes : e.kmCombustible;
+    }
+    delete e.kmCombustible;
   }
   return mapa;
 }
@@ -196,7 +283,12 @@ async function rankingVehiculos(opts = {}) {
       preventivos: 0,
       correctivos: 0,
     };
-    const c = comb.get(id) || { costoCombustible: 0, kmRecorridos: 0 };
+    const c = comb.get(id) || {
+      costoCombustible: 0,
+      kmRecorridos: 0,
+      kmViajes: 0,
+      kmOdometro: 0,
+    };
     const u = mul.get(id) || {
       costoMultas: 0,
       valorMultas: 0,
@@ -223,7 +315,9 @@ async function rankingVehiculos(opts = {}) {
       multas: u.multas,
       inmovilizaciones: u.inmovilizaciones,
       costoTotal,
-      kmRecorridos: c.kmRecorridos,
+      kmRecorridos: c.kmRecorridos, // según la fuente elegida
+      kmViajes: c.kmViajes,
+      kmOdometro: c.kmOdometro,
       costoPorKm,
       ordenes: m.ordenes,
       preventivos: m.preventivos,
@@ -267,6 +361,8 @@ async function kpisGerenciales(opts = {}) {
   const costoCombustibleFlota = ranking.reduce((s, v) => s + v.costoCombustible, 0);
   const costoMultasFlota = ranking.reduce((s, v) => s + v.costoMultas, 0);
   const kmTotalFlota = ranking.reduce((s, v) => s + v.kmRecorridos, 0);
+  const kmViajesFlota = ranking.reduce((s, v) => s + v.kmViajes, 0);
+  const kmOdometroFlota = ranking.reduce((s, v) => s + v.kmOdometro, 0);
   const costoPorKmGlobal =
     kmTotalFlota > 0
       ? Math.round((costoTotalFlota / kmTotalFlota) * 100) / 100
@@ -286,6 +382,7 @@ async function kpisGerenciales(opts = {}) {
   const totalInmovilizaciones = ranking.reduce((s, v) => s + v.inmovilizaciones, 0);
 
   return {
+    fuenteKm: normalizarFuenteKm(opts.fuenteKm),
     flota: {
       total: totalFlota,
       disponibles,
@@ -316,7 +413,9 @@ async function kpisGerenciales(opts = {}) {
       costoMantenimientoFlota,
       costoCombustibleFlota,
       costoMultasFlota,
-      kmTotalFlota,
+      kmTotalFlota, // según fuenteKm
+      kmViajesFlota,
+      kmOdometroFlota,
       costoPorKmGlobal, // $/km
     },
     rankingVehiculos: ranking,
@@ -328,5 +427,7 @@ module.exports = {
   rankingVehiculos,
   costosMantenimientoPorVehiculo,
   combustibleYKmPorVehiculo,
+  kmOdometroPorVehiculo,
   multasPorVehiculo,
+  normalizarFuenteKm,
 };
