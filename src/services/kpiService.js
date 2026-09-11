@@ -7,6 +7,7 @@ const Preoperacional = require("../models/Preoperacional");
 const Multa = require("../models/Multa");
 const KilometrajeDiario = require("../models/KilometrajeDiario");
 const { rangoDias } = require("../utils/rangoFechas");
+const { sumarRecorrido } = require("../utils/recorridoOdometro");
 
 /**
  * Fuente del kilometraje con que se calcula el costo por km:
@@ -118,22 +119,17 @@ async function kmOdometroPorVehiculo({ empresaId, desde, hasta }) {
     .select("vehiculo fecha kilometraje")
     .lean();
 
-  const mapa = new Map();
-  let vehiculoPrev = null;
-  let kmPrev = null;
+  // Agrupar por vehículo y aplicar la regla común (utils/recorridoOdometro)
+  const porVehiculo = new Map();
   for (const s of snapshots) {
     const key = String(s.vehiculo);
-    if (key !== vehiculoPrev) {
-      vehiculoPrev = key;
-      kmPrev = s.kilometraje;
-      if (!mapa.has(key)) mapa.set(key, 0);
-      continue;
-    }
-    const delta = s.kilometraje - kmPrev;
-    if (delta > 0) mapa.set(key, mapa.get(key) + delta);
-    kmPrev = s.kilometraje;
+    if (!porVehiculo.has(key)) porVehiculo.set(key, []);
+    porVehiculo.get(key).push(s);
   }
-  for (const [key, km] of mapa) mapa.set(key, Math.round(km));
+  const mapa = new Map();
+  for (const [key, lista] of porVehiculo) {
+    mapa.set(key, sumarRecorrido(lista).recorridoKm);
+  }
   return mapa;
 }
 

@@ -149,29 +149,9 @@ exports.recorrido = async (req, res) => {
 
 const KilometrajeDiario = require("../models/KilometrajeDiario");
 
-/**
- * Calcula el consolidado de recorrido a partir de snapshots ordenados por fecha.
- * Suma solo las diferencias positivas para tolerar resets o correcciones del
- * odómetro (una diferencia negativa no puede ser recorrido real).
- */
-function consolidarRecorrido(snapshots) {
-  if (!snapshots || snapshots.length === 0) {
-    return { dias: 0, kmInicio: null, kmFin: null, recorridoKm: 0 };
-  }
-  let recorrido = 0;
-  for (let i = 1; i < snapshots.length; i++) {
-    const delta = snapshots[i].kilometraje - snapshots[i - 1].kilometraje;
-    if (delta > 0) recorrido += delta;
-  }
-  return {
-    dias: snapshots.length,
-    kmInicio: snapshots[0].kilometraje,
-    kmFin: snapshots[snapshots.length - 1].kilometraje,
-    fechaInicio: snapshots[0].fecha,
-    fechaFin: snapshots[snapshots.length - 1].fecha,
-    recorridoKm: Math.round(recorrido),
-  };
-}
+// Consolidado de recorrido: regla única compartida con KPIs y análisis por
+// vehículo (diferencias positivas, ignorando saltos imposibles del odómetro).
+const { consolidarRecorrido } = require("../utils/recorridoOdometro");
 
 /**
  * GET /api/telemetria/kilometraje-diario/:id?desde=YYYY-MM-DD&hasta=YYYY-MM-DD

@@ -432,6 +432,7 @@ const OrdenTrabajo = require("../models/OrdenTrabajo");
 const KilometrajeDiario = require("../models/KilometrajeDiario");
 const Multa = require("../models/Multa");
 const { rangoDias } = require("../utils/rangoFechas");
+const { sumarRecorrido, KM_MAX_POR_DIA } = require("../utils/recorridoOdometro");
 
 /**
  * GET /api/estadisticas/vehiculo/:vehiculoId?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
@@ -575,12 +576,8 @@ exports.getVehiculoResumen = async (req, res) => {
     const costoMantenimiento = ordenes.reduce((s, o) => s + (o.costoTotal || 0), 0);
     const otsCerradas = ordenes.filter((o) => o.estado === "CERRADA").length;
 
-    // ── Kilometraje real (snapshots diarios) ──
-    let recorridoKm = 0;
-    for (let i = 1; i < snapshots.length; i++) {
-      const delta = snapshots[i].kilometraje - snapshots[i - 1].kilometraje;
-      if (delta > 0) recorridoKm += delta;
-    }
+    // ── Kilometraje real (snapshots diarios), misma regla que los KPIs ──
+    const { recorridoKm, saltosIgnorados } = sumarRecorrido(snapshots);
     const kmViajes = Math.round(viajesAgg[0]?.km || 0);
     const viajesFinalizados = viajesAgg[0]?.n || 0;
     const kmSeleccionado =
@@ -589,7 +586,8 @@ exports.getVehiculoResumen = async (req, res) => {
       dias: snapshots.length,
       kmInicio: snapshots.length ? snapshots[0].kilometraje : null,
       kmFin: snapshots.length ? snapshots[snapshots.length - 1].kilometraje : null,
-      recorridoKm: Math.round(recorridoKm), // odómetro (snapshots diarios)
+      recorridoKm, // odómetro (snapshots diarios)
+      saltosIgnorados, // saltos imposibles del odómetro descartados
       kmViajes, // viajes finalizados del rango
       viajesFinalizados,
       fuente: fuenteKm,
@@ -598,7 +596,9 @@ exports.getVehiculoResumen = async (req, res) => {
       nota:
         snapshots.length < 2
           ? "Aún no hay suficientes snapshots diarios para consolidar el recorrido (el worker captura uno por día)."
-          : null,
+          : saltosIgnorados > 0
+            ? `Se ignoraron ${saltosIgnorados} salto(s) imposibles del odómetro (más de ${KM_MAX_POR_DIA.toLocaleString("es-CO")} km en un día): revise el kilometraje digitado en las preoperativas o el odómetro del GPS.`
+            : null,
     };
 
     res.json({
