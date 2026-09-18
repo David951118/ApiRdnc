@@ -7,6 +7,7 @@ const validate = require("../middleware/validate");
 const {
   createEmpresa,
   updateEmpresa,
+  cambiarEstadoEmpresa,
 } = require("../validations/empresaValidation");
 
 // Crear
@@ -34,6 +35,23 @@ router.put(
   checkRole(["ADMIN"]),
   validate(updateEmpresa),
   empresaController.update,
+);
+
+// Activar / desactivar empresa (corta el acceso de toda su flota)
+router.patch(
+  "/:id/estado",
+  authenticate,
+  checkRole(["ADMIN"]),
+  validate(cambiarEstadoEmpresa),
+  empresaController.cambiarEstado,
+);
+
+// Alcance de una desactivación: vehículos y usuarios que perderían acceso
+router.get(
+  "/:id/alcance",
+  authenticate,
+  checkRole(["ADMIN"]),
+  empresaController.alcance,
 );
 
 // Soft Delete

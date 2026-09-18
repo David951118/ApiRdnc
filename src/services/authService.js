@@ -3,6 +3,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const UserSession = require("../models/UserSession");
 const Tercero = require("../models/Tercero");
+const empresaAcceso = require("./empresaAccesoService");
 const config = require("../config/env");
 const logger = require("../config/logger");
 
@@ -87,7 +88,7 @@ class AuthService {
 
       // 3. Obtener vehículos asignados al usuario
       // IMPORTANTE: Asegúrate de que este endpoint sea el correcto en Cellvi
-      const vehiculos = await this._getVehiculosUsuario(cellviToken);
+      let vehiculos = await this._getVehiculosUsuario(cellviToken);
 
       logger.info(
         `Usuario ${username} autenticado. Vehículos: ${vehiculos.length}`,
@@ -102,8 +103,17 @@ class AuthService {
           `Tercero asociado encontrado: ${terceroAsociado.nombres || terceroAsociado.razonSocial}`,
         );
 
-        // Mezclar roles locales del sistema (MECANICO/AUDITOR) con los de Cellvi
-        const rolesLocales = terceroAsociado.rolesSistema || [];
+        // Mezclar roles locales del sistema (MECANICO/AUDITOR) con los de Cellvi.
+        // El mecánico líder es un mecánico con permisos extra sobre las OTs de
+        // otros mecánicos: implica ROLE_MECANICO para que apliquen todos los
+        // permisos y scopes del mecánico.
+        const rolesLocales = [...(terceroAsociado.rolesSistema || [])];
+        if (
+          rolesLocales.includes("ROLE_MECANICO_LIDER") &&
+          !rolesLocales.includes("ROLE_MECANICO")
+        ) {
+          rolesLocales.push("ROLE_MECANICO");
+        }
         if (rolesLocales.length > 0) {
           userInfo.roles = [...new Set([...userInfo.roles, ...rolesLocales])];
           logger.info(
@@ -111,6 +121,34 @@ class AuthService {
           );
         }
       }
+
+      // 4b. Control de acceso por empresa: si la empresa del tercero (o la de
+      // todos sus vehículos) está desactivada, no entra; los vehículos de
+      // empresas desactivadas salen de la sesión.
+      const acceso = await empresaAcceso.evaluarAccesoLogin({
+        tercero: terceroAsociado,
+        roles: userInfo.roles,
+        vehiculos,
+      });
+      if (acceso.bloqueado) {
+        logger.warn(
+          `[Auth] Login bloqueado para ${username}: empresa desactivada`,
+        );
+        return {
+          success: false,
+          code: "EMPRESA_INACTIVA",
+          error: "Empresa desactivada",
+          message:
+            "La empresa a la que pertenece su usuario está desactivada. " +
+            "Contacte al administrador de la plataforma.",
+        };
+      }
+      if (acceso.excluidas?.length) {
+        logger.info(
+          `[Auth] ${username}: vehículos excluidos por empresa desactivada: ${acceso.excluidas.join(", ")}`,
+        );
+      }
+      vehiculos = acceso.vehiculos;
 
       // 5. Crear token JWT propio del API RNDC
       const expiresAt = new Date(Date.now() + this.sessionDuration * 60 * 1000);
@@ -214,6 +252,19 @@ class AuthService {
       });
 
       if (!session) return null;
+
+      // La empresa del usuario fue desactivada después de iniciar sesión:
+      // se cierra la sesión (los ADMIN de la plataforma no se bloquean).
+      if (
+        !empresaAcceso.esAdmin(session.userData?.roles) &&
+        (await empresaAcceso.estaBloqueada(session.userData?.empresaId))
+      ) {
+        await UserSession.deleteOne({ _id: session._id });
+        logger.warn(
+          `[Auth] Sesión de ${session.username} cerrada: empresa desactivada`,
+        );
+        return null;
+      }
 
       session.lastActivity = new Date();
       await session.save();

@@ -27,7 +27,9 @@ exports.login = async (req, res) => {
     );
 
     if (!result.success) {
-      return res.status(401).json(result);
+      // 403: credenciales correctas pero la empresa está desactivada
+      const status = result.code === "EMPRESA_INACTIVA" ? 403 : 401;
+      return res.status(status).json(result);
     }
 
     res.json(result);

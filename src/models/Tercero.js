@@ -57,11 +57,13 @@ const TerceroSchema = new Schema(
 
     // Roles de acceso locales que se SUMAN a los roles de Cellvi al hacer login
     // (los roles base ROLE_ADMIN/ROLE_CLIENTE_ADMIN/ROLE_USER vienen de Cellvi).
-    // Permiten otorgar MECANICO o AUDITOR sin tocar la plataforma Cellvi.
+    // Permiten otorgar MECANICO, MECANICO_LIDER o AUDITOR sin tocar Cellvi.
+    // ROLE_MECANICO_LIDER: mecánico que además ve, edita, crea y asigna las OTs
+    // de otros mecánicos de su empresa (en el login implica ROLE_MECANICO).
     rolesSistema: [
       {
         type: String,
-        enum: ["ROLE_MECANICO", "ROLE_AUDITOR"],
+        enum: ["ROLE_MECANICO", "ROLE_MECANICO_LIDER", "ROLE_AUDITOR"],
       },
     ],
 
@@ -140,6 +142,15 @@ TerceroSchema.pre("validate", function () {
   }
   if (!this.usuarioCellvi) {
     this.usuarioCellvi = undefined;
+  }
+  // Quien tiene acceso de mecánico (base o líder) es, para el negocio, un
+  // mecánico: así aparece en el selector de mecánicos de las OTs.
+  const acceso = this.rolesSistema || [];
+  if (
+    acceso.some((r) => ["ROLE_MECANICO", "ROLE_MECANICO_LIDER"].includes(r)) &&
+    !(this.roles || []).includes("MECANICO")
+  ) {
+    this.roles = [...(this.roles || []), "MECANICO"];
   }
 });
 

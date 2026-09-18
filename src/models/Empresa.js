@@ -32,11 +32,30 @@ const EmpresaSchema = new Schema(
       cedula: String,
     },
 
+    // Control de acceso de la flota. Solo ACTIVA permite iniciar sesión a los
+    // usuarios (terceros) de la empresa y a los vehículos afiliados a ella;
+    // al pasar a INACTIVA/SUSPENDIDA se cierran sus sesiones abiertas y el
+    // login queda bloqueado (ver services/empresaAccesoService.js).
     estado: {
       type: String,
       enum: ["ACTIVA", "INACTIVA", "SUSPENDIDA"],
       default: "ACTIVA",
     },
+    // Última desactivación (se limpia al reactivar)
+    desactivacion: {
+      fecha: Date,
+      usuario: String, // userId del admin que desactivó
+      motivo: String,
+    },
+    historialEstado: [
+      {
+        estado: { type: String, enum: ["ACTIVA", "INACTIVA", "SUSPENDIDA"] },
+        fecha: { type: Date, default: Date.now },
+        usuario: String,
+        motivo: String,
+        sesionesCerradas: Number,
+      },
+    ],
 
     // Branding
     branding: {
@@ -61,6 +80,7 @@ const EmpresaSchema = new Schema(
 
 // nit ya tiene índice por unique+index en el schema
 EmpresaSchema.index({ razonSocial: 1 });
+EmpresaSchema.index({ estado: 1 });
 
 EmpresaSchema.methods.softDelete = function (userId) {
   this.deletedAt = new Date();

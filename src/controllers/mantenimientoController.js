@@ -1,6 +1,7 @@
 const PlanMantenimiento = require("../models/PlanMantenimiento");
 const OrdenTrabajo = require("../models/OrdenTrabajo");
 const Vehiculo = require("../models/Vehiculo");
+const Tercero = require("../models/Tercero");
 const alertasService = require("../services/alertasMantenimientoService");
 const s3Service = require("../services/s3Service");
 const { getVehiculoScope } = require("../services/vehiculoAccessService");
@@ -24,6 +25,68 @@ function esMecanicoSolo(req) {
     !roles.includes("SUPER_ADMIN") &&
     !roles.includes("CLIENTE_ADMIN")
   );
+}
+
+/** true si el usuario tiene el rol MECANICO_LIDER (ve/edita/crea/asigna OTs de otros mecánicos) */
+function esMecanicoLider(req) {
+  return (req.user.roles || []).some(
+    (r) => r.replace("ROLE_", "").toUpperCase() === "MECANICO_LIDER",
+  );
+}
+
+/**
+ * Mecánico "de base": sin rol administrativo ni de líder. Solo alcanza las OTs
+ * asignadas a él y las que aún no tienen mecánico (puede tomarlas al operarlas).
+ */
+function esMecanicoRestringido(req) {
+  return esMecanicoSolo(req) && !esMecanicoLider(req);
+}
+
+/**
+ * Alcance de una OT: empresa (no-admin) y, para el mecánico de base, solo sus
+ * OTs o las sin asignar. El líder y la gestión alcanzan todas las de la empresa.
+ */
+function scopeOrden(req, filtro = {}) {
+  scopeEmpresa(req, filtro);
+  if (esMecanicoRestringido(req)) {
+    const propias = req.user.terceroId
+      ? { $or: [{ mecanico: req.user.terceroId }, { mecanico: null }] }
+      : { mecanico: null };
+    filtro.$and = [...(filtro.$and || []), propias];
+  }
+  return filtro;
+}
+
+/**
+ * Un mecánico de base que opera (edita/inicia/cierra) una OT sin mecánico la
+ * toma para sí: queda asignada a él y se registra en el historial.
+ */
+function tomarOrdenSiLibre(ot, req) {
+  if (!ot.mecanico && esMecanicoRestringido(req) && req.user.terceroId) {
+    ot.mecanico = req.user.terceroId;
+    if (ot.estado === "ABIERTA") ot.estado = "ASIGNADA";
+    registrarHistorial(ot, req, "ASIGNADA", `Mecánico: ${ot.mecanico} (tomó la OT)`);
+  }
+}
+
+/**
+ * Verifica que el mecánico a asignar exista, tenga perfil de mecánico y, para
+ * usuarios no-admin, pertenezca a su misma empresa.
+ * @returns {Promise<string|null>} mensaje de error o null si es válido
+ */
+async function validarMecanicoAsignable(req, mecanicoId) {
+  if (!mecanicoId) return null;
+  const filtro = { _id: mecanicoId, deletedAt: null };
+  if (!esAdmin(req) && req.user.empresaId) filtro.empresa = req.user.empresaId;
+  const tercero = await Tercero.findOne(filtro).select("roles rolesSistema").lean();
+  if (!tercero) return "El mecánico indicado no existe o no pertenece a su empresa";
+  const esMecanico =
+    (tercero.roles || []).includes("MECANICO") ||
+    (tercero.rolesSistema || []).some((r) =>
+      ["ROLE_MECANICO", "ROLE_MECANICO_LIDER"].includes(r),
+    );
+  if (!esMecanico) return "El tercero indicado no tiene perfil de mecánico";
+  return null;
 }
 
 /**
@@ -206,6 +269,38 @@ exports.crearOrden = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Vehículo no encontrado" });
 
+    // Un usuario de empresa solo abre OTs para vehículos de su empresa
+    if (
+      !esAdmin(req) &&
+      req.user.empresaId &&
+      String(vehiculo.empresaAfiliadora || "") !== String(req.user.empresaId)
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "El vehículo no pertenece a su empresa",
+      });
+    }
+
+    // Mecánico de base: solo crea OTs para sí mismo (403 si apunta a otro).
+    // Líder y gestión pueden crear para cualquier mecánico de su empresa.
+    const mecanicoSolicitado = req.body.mecanico || null;
+    if (esMecanicoRestringido(req)) {
+      if (
+        mecanicoSolicitado &&
+        String(mecanicoSolicitado) !== String(req.user.terceroId || "")
+      ) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Solo un mecánico líder o un administrador puede crear órdenes para otros mecánicos",
+        });
+      }
+    } else if (mecanicoSolicitado) {
+      const errorMecanico = await validarMecanicoAsignable(req, mecanicoSolicitado);
+      if (errorMecanico)
+        return res.status(400).json({ success: false, message: errorMecanico });
+    }
+
     const { factura, ...datos } = req.body;
     const ot = new OrdenTrabajo({
       ...datos,
@@ -216,7 +311,7 @@ exports.crearOrden = async (req, res) => {
     registrarHistorial(ot, req, "CREADA", req.body.descripcion);
     if (factura) await aplicarFactura(ot, req, factura);
 
-    // Un mecánico que crea una OT sin indicar mecánico queda auto-asignado
+    // Un mecánico (de base o líder) que crea una OT sin indicar mecánico queda auto-asignado
     if (!ot.mecanico && esMecanicoSolo(req) && req.user.terceroId) {
       ot.mecanico = req.user.terceroId;
     }
@@ -247,7 +342,9 @@ exports.listarOrdenes = async (req, res) => {
       limit = 25,
     } = req.query;
 
-    const filtro = scopeEmpresa(req, { deletedAt: null });
+    // scopeOrden: empresa para no-admin; el mecánico de base solo ve sus OTs y
+    // las sin asignar; el líder ve las de todos los mecánicos de su empresa.
+    const filtro = scopeOrden(req, { deletedAt: null });
     if (estado) filtro.estado = estado;
     if (tipo) filtro.tipo = tipo;
     if (vehiculo) filtro.vehiculo = vehiculo;
@@ -268,8 +365,7 @@ exports.listarOrdenes = async (req, res) => {
       ];
     }
 
-    // El MECANICO ve todas las OTs de su empresa (scopeEmpresa ya acota el filtro);
-    // puede seguir filtrando por mecánico con el query param.
+    // El query param `mecanico` sigue disponible para líder y gestión.
 
     // Un CONDUCTOR/cliente solo ve las OTs de sus propios vehículos
     if (esConductorSolo(req)) {
@@ -310,7 +406,7 @@ exports.listarOrdenes = async (req, res) => {
 exports.obtenerOrden = async (req, res) => {
   try {
     const ot = await OrdenTrabajo.findOne(
-      scopeEmpresa(req, { _id: req.params.id, deletedAt: null }),
+      scopeOrden(req, { _id: req.params.id, deletedAt: null }),
     )
       .populate("vehiculo", "placa claseVehiculo marca linea")
       .populate("mecanico", "nombres apellidos identificacion")
@@ -331,7 +427,7 @@ exports.obtenerOrden = async (req, res) => {
 exports.actualizarOrden = async (req, res) => {
   try {
     const ot = await OrdenTrabajo.findOne(
-      scopeEmpresa(req, { _id: req.params.id, deletedAt: null }),
+      scopeOrden(req, { _id: req.params.id, deletedAt: null }),
     );
     if (!ot)
       return res
@@ -344,6 +440,8 @@ exports.actualizarOrden = async (req, res) => {
         message: `No se puede modificar una orden ${ot.estado}`,
       });
     }
+
+    tomarOrdenSiLibre(ot, req);
 
     // Campos editables mientras la OT está abierta
     const editables = [
@@ -387,6 +485,12 @@ exports.asignarOrden = async (req, res) => {
       });
     }
 
+    if (mecanico) {
+      const errorMecanico = await validarMecanicoAsignable(req, mecanico);
+      if (errorMecanico)
+        return res.status(400).json({ success: false, message: errorMecanico });
+    }
+
     if (mecanico !== undefined) ot.mecanico = mecanico;
     if (taller !== undefined) ot.taller = taller;
     if (fechaProgramada !== undefined) ot.fechaProgramada = fechaProgramada;
@@ -402,10 +506,9 @@ exports.asignarOrden = async (req, res) => {
 
 exports.iniciarOrden = async (req, res) => {
   try {
-    const ot = await OrdenTrabajo.findOne({
-      _id: req.params.id,
-      deletedAt: null,
-    });
+    const ot = await OrdenTrabajo.findOne(
+      scopeOrden(req, { _id: req.params.id, deletedAt: null }),
+    );
     if (!ot)
       return res
         .status(404)
@@ -418,6 +521,7 @@ exports.iniciarOrden = async (req, res) => {
       });
     }
 
+    tomarOrdenSiLibre(ot, req);
     ot.estado = "EN_PROCESO";
     registrarHistorial(ot, req, "INICIADA");
     await ot.save();
@@ -429,10 +533,9 @@ exports.iniciarOrden = async (req, res) => {
 
 exports.cerrarOrden = async (req, res) => {
   try {
-    const ot = await OrdenTrabajo.findOne({
-      _id: req.params.id,
-      deletedAt: null,
-    });
+    const ot = await OrdenTrabajo.findOne(
+      scopeOrden(req, { _id: req.params.id, deletedAt: null }),
+    );
     if (!ot)
       return res
         .status(404)
@@ -444,6 +547,8 @@ exports.cerrarOrden = async (req, res) => {
         message: `La orden ya está ${ot.estado}`,
       });
     }
+
+    tomarOrdenSiLibre(ot, req);
 
     // El cierre exige el kilometraje: es el baseline del próximo ciclo preventivo
     const kilometraje = req.body.kilometraje ?? ot.kilometraje;
@@ -537,7 +642,7 @@ exports.anularOrden = async (req, res) => {
 exports.adjuntarFactura = async (req, res) => {
   try {
     const ot = await OrdenTrabajo.findOne(
-      scopeEmpresa(req, { _id: req.params.id, deletedAt: null }),
+      scopeOrden(req, { _id: req.params.id, deletedAt: null }),
     );
     if (!ot)
       return res
@@ -564,7 +669,7 @@ exports.adjuntarFactura = async (req, res) => {
 exports.eliminarFactura = async (req, res) => {
   try {
     const ot = await OrdenTrabajo.findOne(
-      scopeEmpresa(req, { _id: req.params.id, deletedAt: null }),
+      scopeOrden(req, { _id: req.params.id, deletedAt: null }),
     );
     if (!ot)
       return res

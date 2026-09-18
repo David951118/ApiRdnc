@@ -5,7 +5,50 @@ const ContratoFuec = require("../models/ContratoFUEC");
 const Preoperacional = require("../models/Preoperacional");
 const Ruta = require("../models/Ruta");
 const { deleteDocumentosWithS3, cleanEntidadesAsociadas } = require("../helpers/cascadeDelete");
+const empresaAcceso = require("../services/empresaAccesoService");
 const logger = require("../config/logger");
+
+/**
+ * Aplica un cambio de estado a la empresa con sus efectos:
+ *  - registra historial y datos de la desactivación,
+ *  - invalida el cache de empresas bloqueadas,
+ *  - si deja de estar ACTIVA, cierra las sesiones de sus usuarios y de los
+ *    vehículos afiliados (pierden acceso de inmediato; el login queda bloqueado).
+ * @returns {Promise<{ sesionesCerradas: number, vehiculos: number, terceros: number }>}
+ */
+async function aplicarCambioEstado(empresa, nuevoEstado, motivo, req) {
+  const usuario = req.user?.userId || req.user?.username || null;
+  const bloquea = nuevoEstado !== "ACTIVA";
+
+  empresa.estado = nuevoEstado;
+  if (bloquea) {
+    empresa.desactivacion = { fecha: new Date(), usuario, motivo: motivo || "" };
+  } else {
+    empresa.desactivacion = undefined;
+  }
+  await empresa.save();
+  empresaAcceso.invalidarCache();
+
+  let afectados = { sesionesCerradas: 0, ...(await empresaAcceso.alcanceEmpresa(empresa._id)) };
+  if (bloquea) {
+    afectados = await empresaAcceso.cerrarSesionesEmpresa(empresa._id);
+  }
+
+  empresa.historialEstado.push({
+    estado: nuevoEstado,
+    fecha: new Date(),
+    usuario,
+    motivo: motivo || "",
+    sesionesCerradas: afectados.sesionesCerradas,
+  });
+  await empresa.save();
+
+  logger.info(
+    `Empresa ${empresa.razonSocial} (${empresa._id}) → ${nuevoEstado} por ${usuario}` +
+      (bloquea ? `: ${afectados.sesionesCerradas} sesión(es) cerrada(s)` : ""),
+  );
+  return afectados;
+}
 
 // Crear Empresa (Solo ADMIN)
 exports.create = async (req, res) => {
@@ -50,6 +93,27 @@ exports.getAll = async (req, res) => {
       .lean();
 
     const total = await Empresa.countDocuments(query);
+
+    // Tamaño de la flota y usuarios por empresa (alcance de una desactivación)
+    const ids = empresas.map((e) => e._id);
+    if (ids.length > 0) {
+      const [vehAgg, terAgg] = await Promise.all([
+        Vehiculo.aggregate([
+          { $match: { empresaAfiliadora: { $in: ids }, deletedAt: null } },
+          { $group: { _id: "$empresaAfiliadora", total: { $sum: 1 } } },
+        ]),
+        Tercero.aggregate([
+          { $match: { empresa: { $in: ids }, deletedAt: null } },
+          { $group: { _id: "$empresa", total: { $sum: 1 } } },
+        ]),
+      ]);
+      const vehPor = Object.fromEntries(vehAgg.map((x) => [String(x._id), x.total]));
+      const terPor = Object.fromEntries(terAgg.map((x) => [String(x._id), x.total]));
+      for (const e of empresas) {
+        e.totalVehiculos = vehPor[String(e._id)] || 0;
+        e.totalTerceros = terPor[String(e._id)] || 0;
+      }
+    }
 
     res.json({
       success: true,
@@ -140,16 +204,72 @@ exports.update = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Empresa no encontrada" });
 
-    const { branding, ...rest } = req.body;
+    const { branding, estado, ...rest } = req.body;
     Object.assign(empresa, rest);
     if (branding) {
       empresa.branding = { ...empresa.branding?.toObject?.() ?? empresa.branding, ...branding };
     }
     await empresa.save();
-    res.json({ success: true, data: empresa });
+    // Un cambio de estado por el PUT genérico aplica los mismos efectos que
+    // PATCH /:id/estado (cierre de sesiones, historial).
+    let afectados;
+    if (estado && estado !== empresa.estado) {
+      afectados = await aplicarCambioEstado(empresa, estado, req.body.motivo, req);
+    }
+    res.json({ success: true, data: empresa, afectados });
   } catch (error) {
     logger.error(`Error actualizando empresa: ${error.message}`);
     res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+// Activar / desactivar empresa (Solo ADMIN)
+// PATCH /empresas/:id/estado  { estado: ACTIVA|INACTIVA|SUSPENDIDA, motivo? }
+exports.cambiarEstado = async (req, res) => {
+  try {
+    const { estado, motivo } = req.body;
+    const empresa = await Empresa.findOne({
+      _id: req.params.id,
+      deletedAt: null,
+    });
+    if (!empresa)
+      return res
+        .status(404)
+        .json({ success: false, message: "Empresa no encontrada" });
+    if (empresa.estado === estado) {
+      return res.status(400).json({
+        success: false,
+        message: `La empresa ya está ${estado}`,
+      });
+    }
+
+    const afectados = await aplicarCambioEstado(empresa, estado, motivo, req);
+    const message =
+      estado === "ACTIVA"
+        ? `Empresa activada: sus ${afectados.vehiculos} vehículo(s) y ${afectados.terceros} usuario(s) recuperan el acceso`
+        : `Empresa ${estado === "SUSPENDIDA" ? "suspendida" : "desactivada"}: ${afectados.vehiculos} vehículo(s) y ${afectados.terceros} usuario(s) sin acceso; ${afectados.sesionesCerradas} sesión(es) cerrada(s)`;
+
+    res.json({ success: true, message, data: empresa, afectados });
+  } catch (error) {
+    logger.error(`Error cambiando estado de empresa: ${error.message}`);
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+// Alcance de una desactivación (Solo ADMIN)
+exports.alcance = async (req, res) => {
+  try {
+    const empresa = await Empresa.findOne({ _id: req.params.id, deletedAt: null })
+      .select("estado razonSocial")
+      .lean();
+    if (!empresa)
+      return res
+        .status(404)
+        .json({ success: false, message: "Empresa no encontrada" });
+    const alcance = await empresaAcceso.alcanceEmpresa(empresa._id);
+    res.json({ success: true, data: { ...alcance, estado: empresa.estado } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 

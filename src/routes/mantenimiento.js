@@ -14,11 +14,15 @@ const {
   facturaOrden,
 } = require("../validations/mantenimientoValidation");
 
-// Roles: gestión completa ADMIN/CLIENTE_ADMIN; MECANICO opera sus OTs;
-// AUDITOR solo lectura. (El middleware authenticate ya corre a nivel de app)
+// Roles: gestión completa ADMIN/CLIENTE_ADMIN; MECANICO opera SUS OTs (las
+// asignadas a él y las sin asignar); MECANICO_LIDER además ve, edita, crea y
+// asigna OTs de otros mecánicos de su empresa (en sesión trae también
+// MECANICO, ver authService); AUDITOR solo lectura.
+// (El middleware authenticate ya corre a nivel de app)
 const GESTION = ["ADMIN", "SUPER_ADMIN", "CLIENTE_ADMIN"];
 const LECTURA = [...GESTION, "MECANICO", "AUDITOR"];
 const OPERACION = [...GESTION, "MECANICO"];
+const ASIGNACION = [...GESTION, "MECANICO_LIDER"];
 // El conductor/cliente puede CONSULTAR (no gestionar) el mantenimiento de sus
 // vehículos; el controlador acota a sus vehículos con getVehiculoScope.
 const LECTURA_CONDUCTOR = [...LECTURA, "CONDUCTOR", "CLIENTE", "USER", "PROPIETARIO"];
@@ -61,9 +65,10 @@ router.put(
   validate(updateOrden),
   ctrl.actualizarOrden,
 );
+// Asignar/reasignar mecánico: gestión y mecánico líder (dentro de su empresa)
 router.post(
   "/ordenes/:id/asignar",
-  checkRole(GESTION),
+  checkRole(ASIGNACION),
   validate(asignarOrden),
   ctrl.asignarOrden,
 );

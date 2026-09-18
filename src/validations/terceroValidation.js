@@ -114,8 +114,12 @@ const createTercero = Joi.object({
     }),
 
   // Roles de acceso locales (se suman a los de Cellvi al hacer login)
+  // ROLE_MECANICO_LIDER: mecánico que además ve, edita y crea/asigna OTs de
+  // otros mecánicos de su empresa (implica ROLE_MECANICO al iniciar sesión).
   rolesSistema: Joi.array()
-    .items(Joi.string().valid("ROLE_MECANICO", "ROLE_AUDITOR"))
+    .items(
+      Joi.string().valid("ROLE_MECANICO", "ROLE_MECANICO_LIDER", "ROLE_AUDITOR"),
+    )
     .optional(),
 
   // Contacto (simplificado para datos personales si hay empresa)

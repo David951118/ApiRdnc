@@ -40,11 +40,25 @@ const createEmpresa = Joi.object({
   }),
 });
 
-const updateEmpresa = createEmpresa.fork(["nit", "razonSocial"], (schema) =>
-  schema.optional(),
-);
+const updateEmpresa = createEmpresa
+  .fork(["nit", "razonSocial"], (schema) => schema.optional())
+  // Sin defaults en la actualización: un PUT parcial (branding, nombre) no
+  // debe reactivar una empresa desactivada ni cambiar su tipo.
+  .fork(["estado"], () =>
+    Joi.string().valid("ACTIVA", "INACTIVA", "SUSPENDIDA"),
+  )
+  .fork(["tipoEmpresa"], () =>
+    Joi.string().valid("TRANSPORTADORA", "CLIENTE_CORPORATIVO", "PROVEEDOR"),
+  );
+
+// PATCH /empresas/:id/estado — activar / desactivar la empresa (y su flota)
+const cambiarEstadoEmpresa = Joi.object({
+  estado: Joi.string().valid("ACTIVA", "INACTIVA", "SUSPENDIDA").required(),
+  motivo: Joi.string().trim().max(500).allow("", null),
+});
 
 module.exports = {
   createEmpresa,
   updateEmpresa,
+  cambiarEstadoEmpresa,
 };
