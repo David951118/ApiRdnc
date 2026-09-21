@@ -22,9 +22,12 @@ const OPERACION = [...GESTION, "CONDUCTOR"];
 const REGISTRO_TANQUEO = [...OPERACION, "CLIENTE", "USER", "PROPIETARIO"];
 // El cliente final también puede LISTAR, pero el controlador lo acota a sus vehículos.
 const LECTURA_COMBUSTIBLE = [...LECTURA, "CLIENTE", "USER", "PROPIETARIO"];
-// Editar/eliminar/papelera de tanqueos: EXCLUSIVO del admin de plataforma, porque
-// modificar la serie recalcula el rendimiento tanque-a-tanque de todo el vehículo.
+// Eliminar/papelera de tanqueos: EXCLUSIVO del admin de plataforma, porque quitar
+// registros de la serie recalcula el rendimiento tanque-a-tanque de todo el vehículo.
 const ADMIN_COMBUSTIBLE = ["ADMIN", "SUPER_ADMIN"];
+// Editar tanqueos: también el admin de la empresa (CLIENTE_ADMIN). El controlador
+// lo acota con scopeEmpresa, así que solo alcanza los tanqueos de su propia empresa.
+const EDICION_TANQUEO = [...ADMIN_COMBUSTIBLE, "CLIENTE_ADMIN"];
 
 // ═══ COMBUSTIBLE ═══
 router.get(
@@ -41,7 +44,7 @@ router.post(
 router.get("/combustible", checkRole(LECTURA_COMBUSTIBLE), ctrl.listarTanqueos);
 router.put(
   "/combustible/:id",
-  checkRole(ADMIN_COMBUSTIBLE),
+  checkRole(EDICION_TANQUEO),
   validate(updateTanqueo),
   ctrl.actualizarTanqueo,
 );
