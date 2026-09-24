@@ -89,7 +89,7 @@ const createTanqueo = Joi.object({
   galones: Joi.number().min(0).required(),
   costoTotal: Joi.number().min(0),
   costoPorGalon: Joi.number().min(0),
-  tipoCombustible: Joi.string().valid("GASOLINA", "DIESEL", "GAS"),
+  tipoCombustible: Joi.string().valid("GASOLINA", "DIESEL", "GAS", "UREA"),
   estacion: Joi.string().allow("", null),
   tanqueLleno: Joi.boolean(),
 }).or("costoTotal", "costoPorGalon", "galones");
@@ -104,7 +104,7 @@ const updateTanqueo = Joi.object({
   galones: Joi.number().min(0),
   costoTotal: Joi.number().min(0).allow(null),
   costoPorGalon: Joi.number().min(0).allow(null),
-  tipoCombustible: Joi.string().valid("GASOLINA", "DIESEL", "GAS"),
+  tipoCombustible: Joi.string().valid("GASOLINA", "DIESEL", "GAS", "UREA"),
   estacion: Joi.string().allow("", null),
   tanqueLleno: Joi.boolean(),
 }).min(1);

@@ -11,6 +11,8 @@ const logger = require("../config/logger");
  * El primer tanqueo no tiene tramo previo → rendimientoTramo = null.
  * Solo se consideran tramos cuyo tanqueo cierra con tanque lleno (tanqueLleno),
  * que es la condición para que el método sea válido.
+ * Las cargas de UREA (aditivo) no son combustible: quedan fuera de la serie
+ * (rendimientoTramo = null y no cortan el tramo del combustible).
  */
 
 /**
@@ -24,12 +26,13 @@ async function recalcularRendimiento(vehiculoId) {
     deletedAt: null,
   })
     .sort({ kmTanqueo: 1, fecha: 1 })
-    .select("kmTanqueo galones tanqueLleno rendimientoTramo");
+    .select("kmTanqueo galones tanqueLleno tipoCombustible rendimientoTramo");
 
   let anterior = null;
   for (const t of tanqueos) {
+    const esUrea = t.tipoCombustible === "UREA";
     let rendimiento = null;
-    if (anterior && t.tanqueLleno && t.galones > 0) {
+    if (!esUrea && anterior && t.tanqueLleno && t.galones > 0) {
       const tramoKm = t.kmTanqueo - anterior.kmTanqueo;
       if (tramoKm > 0) {
         rendimiento = Math.round((tramoKm / t.galones) * 100) / 100;
@@ -39,7 +42,7 @@ async function recalcularRendimiento(vehiculoId) {
       t.rendimientoTramo = rendimiento;
       await t.save();
     }
-    anterior = t;
+    if (!esUrea) anterior = t;
   }
 }
 
@@ -81,7 +84,8 @@ async function resumenPorVehiculo(filtro = {}) {
     }
     const acc = porVehiculo.get(vid);
     acc.tanqueos++;
-    acc.galonesTotal += t.galones || 0;
+    // La urea suma al costo pero no a los galones de combustible
+    if (t.tipoCombustible !== "UREA") acc.galonesTotal += t.galones || 0;
     acc.costoTotal += t.costoTotal || 0;
     // rendimientoTramo persistido implica que hubo tramo válido
     if (t.rendimientoTramo != null && t.galones > 0) {

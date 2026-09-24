@@ -28,7 +28,7 @@ const CargaCombustibleSchema = new Schema(
 
     tipoCombustible: {
       type: String,
-      enum: ["GASOLINA", "DIESEL", "GAS"],
+      enum: ["GASOLINA", "DIESEL", "GAS", "UREA"], // UREA = aditivo AdBlue, no entra al rendimiento
     },
     estacion: String, // estación de servicio
     tanqueLleno: { type: Boolean, default: true }, // necesario para rendimiento tanque-a-tanque
