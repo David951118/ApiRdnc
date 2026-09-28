@@ -6,6 +6,7 @@ const EquipoGPS = require("../models/EquipoGPS");
 const ActividadGPS = require("../models/ActividadGPS");
 const Vehiculo = require("../models/Vehiculo");
 const logger = require("../config/logger");
+const { fechaDeDiaColombia } = require("../utils/rangoFechas");
 
 // ════════════════════════════════════════════════════════════════
 // MARCA GPS
@@ -2393,7 +2394,7 @@ exports.crearActividad = async (req, res) => {
       tipoPropiedad,
       propietarioNombre,
       destinoEquipoRetirado,
-      fechaActividad: fechaActividad ? new Date(fechaActividad) : ahora,
+      fechaActividad: fechaDeDiaColombia(fechaActividad) || ahora,
       observaciones: observaciones || null,
     });
 
@@ -2586,7 +2587,7 @@ exports.actualizarActividad = async (req, res) => {
     actividad.tipoPropiedad = tipoPropFinal;
     actividad.propietarioNombre = propFinal;
     if (fechaActividad !== undefined && fechaActividad)
-      actividad.fechaActividad = new Date(fechaActividad);
+      actividad.fechaActividad = fechaDeDiaColombia(fechaActividad);
     if (observaciones !== undefined) actividad.observaciones = observaciones || null;
 
     await actividad.save();

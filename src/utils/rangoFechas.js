@@ -45,4 +45,29 @@ function rangoDias(desde, hasta) {
   return filtro;
 }
 
-module.exports = { inicioDelDia, finDelDia, rangoDias };
+/** Día calendario colombiano (YYYY-MM-DD) de un instante. */
+function diaColombia(fecha = new Date()) {
+  const co = new Date(fecha.getTime() - 5 * 60 * 60 * 1000);
+  return co.toISOString().slice(0, 10);
+}
+
+/**
+ * Fecha a guardar cuando el usuario escoge solo un día ("2026-09-28").
+ * Guardarla como medianoche UTC la mostraba en Colombia como el día anterior
+ * a las 7 p. m. Si el día es hoy se guarda la hora actual; si es otro día,
+ * el mediodía colombiano, que cae dentro del mismo día en cualquier zona.
+ */
+function fechaDeDiaColombia(valor) {
+  if (valor === undefined || valor === null || valor === "") return null;
+  if (valor instanceof Date) return isNaN(valor.getTime()) ? null : valor;
+  const texto = String(valor).trim();
+  if (SOLO_FECHA.test(texto)) {
+    if (texto === diaColombia()) return new Date();
+    const fecha = new Date(`${texto}T12:00:00.000${OFFSET_CO}`);
+    return isNaN(fecha.getTime()) ? null : fecha;
+  }
+  const fecha = new Date(texto);
+  return isNaN(fecha.getTime()) ? null : fecha;
+}
+
+module.exports = { inicioDelDia, finDelDia, rangoDias, diaColombia, fechaDeDiaColombia };

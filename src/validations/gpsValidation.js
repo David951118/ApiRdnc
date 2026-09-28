@@ -224,7 +224,9 @@ const crearActividad = Joi.object({
     otherwise: Joi.optional().allow("", null),
   }),
 
-  fechaActividad: Joi.date().optional(),
+  fechaActividad: Joi.alternatives()
+    .try(Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/), Joi.date())
+    .optional(),
   observaciones: Joi.string().trim().allow("", null),
 }).custom((value, helpers) => {
   // Si la actividad requiere retiro, debe haber equipoRetirado o equipoRetiradoNuevo.
@@ -260,7 +262,9 @@ const updateActividad = Joi.object({
       }),
       otherwise: Joi.optional().allow("", null),
     }),
-  fechaActividad: Joi.date().optional(),
+  fechaActividad: Joi.alternatives()
+    .try(Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/), Joi.date())
+    .optional(),
   observaciones: Joi.string().trim().allow("", null),
 }).min(1);
 
