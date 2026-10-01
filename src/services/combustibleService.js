@@ -1,5 +1,6 @@
 const CargaCombustible = require("../models/CargaCombustible");
 const logger = require("../config/logger");
+const { rangoDias } = require("../utils/rangoFechas");
 
 /**
  * Servicio de rendimiento de combustible (método tanque a tanque).
@@ -56,11 +57,8 @@ async function resumenPorVehiculo(filtro = {}) {
   const match = { deletedAt: null };
   if (filtro.empresa) match.empresa = filtro.empresa;
   if (filtro.vehiculo) match.vehiculo = filtro.vehiculo;
-  if (filtro.desde || filtro.hasta) {
-    match.fecha = {};
-    if (filtro.desde) match.fecha.$gte = new Date(filtro.desde);
-    if (filtro.hasta) match.fecha.$lte = new Date(filtro.hasta);
-  }
+  const rango = rangoDias(filtro.desde, filtro.hasta);
+  if (rango) match.fecha = rango;
 
   const tanqueos = await CargaCombustible.find(match)
     .sort({ vehiculo: 1, kmTanqueo: 1 })

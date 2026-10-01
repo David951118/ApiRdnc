@@ -80,11 +80,18 @@ const cancelarViaje = Joi.object({
   motivo: Joi.string().allow("", null),
 });
 
+// El formulario envía el día ("2026-09-30"). Se deja pasar como texto para que
+// Joi no lo convierta a medianoche UTC (en Colombia = día anterior, 7 p. m.);
+// el controller lo ancla al día colombiano con fechaDeDiaColombia.
+const fechaTanqueo = Joi.alternatives()
+  .try(Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/), Joi.date())
+  .allow(null);
+
 const createTanqueo = Joi.object({
   vehiculo: mongoId.required(),
   conductor: mongoId.allow(null),
   viaje: mongoId.allow(null),
-  fecha: Joi.date().allow(null),
+  fecha: fechaTanqueo,
   kmTanqueo: Joi.number().min(0).required(),
   galones: Joi.number().min(0).required(),
   costoTotal: Joi.number().min(0),
@@ -99,7 +106,7 @@ const createTanqueo = Joi.object({
 const updateTanqueo = Joi.object({
   conductor: mongoId.allow(null),
   viaje: mongoId.allow(null),
-  fecha: Joi.date().allow(null),
+  fecha: fechaTanqueo,
   kmTanqueo: Joi.number().min(0),
   galones: Joi.number().min(0),
   costoTotal: Joi.number().min(0).allow(null),

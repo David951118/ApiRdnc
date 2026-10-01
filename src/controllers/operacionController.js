@@ -10,6 +10,11 @@ const {
 } = require("../services/vehiculoAccessService");
 const { KM_MAXIMO_PLAUSIBLE } = require("../services/kilometrajeService");
 const logger = require("../config/logger");
+const {
+  rangoDias,
+  diaColombia,
+  fechaDeDiaColombia,
+} = require("../utils/rangoFechas");
 
 // Roles de gestión (admin de plataforma o de la empresa): los únicos que pueden
 // corregir un viaje ya finalizado. El conductor edita su bitácora solo mientras
@@ -631,8 +636,11 @@ exports.registrarTanqueo = async (req, res) => {
         message: "No tiene permiso para registrar tanqueos de este vehículo",
       });
 
+    // Sin fecha (o null) queda el default del modelo: ahora.
+    const fecha = fechaDeDiaColombia(req.body.fecha);
     const carga = new CargaCombustible({
       ...req.body,
+      fecha: fecha || undefined,
       placa: vehiculo.placa,
       empresa: vehiculo.empresaAfiliadora || null,
       registradoPor: req.user.username,
@@ -670,11 +678,8 @@ exports.listarTanqueos = async (req, res) => {
     const filtro = scopeEmpresa(req, {});
     filtro.deletedAt = verEliminadas ? { $ne: null } : null;
     if (vehiculo) filtro.vehiculo = vehiculo;
-    if (desde || hasta) {
-      filtro.fecha = {};
-      if (desde) filtro.fecha.$gte = new Date(desde);
-      if (hasta) filtro.fecha.$lte = new Date(hasta);
-    }
+    const rango = rangoDias(desde, hasta);
+    if (rango) filtro.fecha = rango;
 
     // El cliente final solo ve tanqueos de sus propios vehículos. La propiedad del
     // vehículo es el guard real; quitamos el filtro de empresa porque empresaId puede
@@ -744,8 +749,19 @@ exports.actualizarTanqueo = async (req, res) => {
       "tanqueLleno",
     ];
     editables.forEach((campo) => {
+      if (campo === "fecha") return;
       if (req.body[campo] !== undefined) carga[campo] = req.body[campo];
     });
+    // El form de edición reenvía el día aunque no lo cambien: si es el mismo día
+    // colombiano se conserva la hora original; si cambió, se ancla a ese día.
+    if (req.body.fecha !== undefined && req.body.fecha !== null && req.body.fecha !== "") {
+      const nueva = fechaDeDiaColombia(req.body.fecha);
+      const mismoDia =
+        carga.fecha &&
+        typeof req.body.fecha === "string" &&
+        diaColombia(carga.fecha) === req.body.fecha.trim();
+      if (nueva && !mismoDia) carga.fecha = nueva;
+    }
     await carga.save();
 
     // Recalcular rendimiento de la serie del vehículo (km/galón depende del tramo)
