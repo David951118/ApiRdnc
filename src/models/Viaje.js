@@ -87,6 +87,8 @@ const ViajeSchema = new Schema(
     carga: {
       pesoKg: Number,
       descripcion: String,
+      cantidadCajas: { type: Number, min: 0 }, // unidades / cajas transportadas
+      descripcionCajas: String, // contenido o tipo de las cajas
       sobrecarga: { type: Boolean, default: false }, // calculado vs vehículo
       excesoKg: Number, // cuánto se pasó del tope (si sobrecarga)
     },

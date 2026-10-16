@@ -5,6 +5,8 @@ const mongoId = Joi.string().regex(/^[0-9a-fA-F]{24}$/);
 const carga = Joi.object({
   pesoKg: Joi.number().min(0).allow(null),
   descripcion: Joi.string().allow("", null),
+  cantidadCajas: Joi.number().integer().min(0).allow(null),
+  descripcionCajas: Joi.string().allow("", null),
 });
 
 const entrega = Joi.object({

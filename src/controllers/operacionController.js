@@ -440,6 +440,12 @@ exports.actualizarViaje = async (req, res) => {
       if (distinto(antes, despues)) cambios.push(`carga: ${antes ?? "—"} kg → ${despues ?? "—"} kg`);
       else if (distinto(viaje.carga?.descripcion, req.body.carga?.descripcion))
         cambios.push("descripción de carga actualizada");
+      const cajasAntes = viaje.carga?.cantidadCajas ?? null;
+      const cajasDespues = req.body.carga?.cantidadCajas ?? null;
+      if (distinto(cajasAntes, cajasDespues))
+        cambios.push(`cajas: ${cajasAntes ?? "—"} → ${cajasDespues ?? "—"}`);
+      else if (distinto(viaje.carga?.descripcionCajas, req.body.carga?.descripcionCajas))
+        cambios.push("descripción de cajas actualizada");
     }
     if (req.body.entregas !== undefined) cambios.push("entregas actualizadas");
     if (req.body.incidencias !== undefined) cambios.push("incidencias actualizadas");
