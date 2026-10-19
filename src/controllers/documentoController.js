@@ -4,6 +4,7 @@ const Tercero = require("../models/Tercero");
 const Empresa = require("../models/Empresa");
 const logger = require("../config/logger");
 const s3Service = require("../services/s3Service");
+const { diasCalendarioHasta } = require("../utils/rangoFechas");
 
 /**
  * Helper: Recalcula el estado de un documento según su fechaVencimiento.
@@ -14,9 +15,8 @@ function recalcularEstado(doc) {
   if (!doc || !doc.fechaVencimiento) return doc;
   if (doc.estado === "HISTORICO" || doc.estado === "RECHAZADO") return doc;
 
-  const hoy = new Date();
-  const vencimiento = new Date(doc.fechaVencimiento);
-  const diasRestantes = Math.ceil((vencimiento - hoy) / (1000 * 60 * 60 * 24));
+  // Por día calendario colombiano: vence hoy = sigue vigente hasta las 23:59.
+  const diasRestantes = diasCalendarioHasta(doc.fechaVencimiento);
 
   if (diasRestantes < 0) {
     doc.estado = "VENCIDO";

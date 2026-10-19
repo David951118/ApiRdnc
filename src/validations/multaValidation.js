@@ -1,4 +1,5 @@
 const Joi = require("joi");
+const fechaDia = require("./fechaDia");
 
 const mongoId = Joi.string().regex(/^[0-9a-fA-F]{24}$/);
 
@@ -45,7 +46,7 @@ const createMulta = Joi.object({
   ciudad: Joi.string().allow("", null),
   lugar: Joi.string().allow("", null),
   valor: Joi.number().min(0).required(),
-  fechaLimitePago: Joi.date().allow(null),
+  fechaLimitePago: fechaDia.allow(null),
   responsable: Joi.string().valid(...RESPONSABLES),
   fotos: Joi.array().items(archivo),
   inmovilizacion: inmovilizacionCreate,
@@ -66,7 +67,7 @@ const updateMulta = Joi.object({
   ciudad: Joi.string().allow("", null),
   lugar: Joi.string().allow("", null),
   valor: Joi.number().min(0),
-  fechaLimitePago: Joi.date().allow(null),
+  fechaLimitePago: fechaDia.allow(null),
   responsable: Joi.string().valid(...RESPONSABLES),
   observaciones: Joi.string().allow("", null),
   // Solo datos informativos de la inmovilización; el ciclo (aplica/estado) va
@@ -88,7 +89,7 @@ const agregarFotos = Joi.object({
 
 const pagarMulta = Joi.object({
   valorPagado: Joi.number().min(0).required(),
-  fechaPago: Joi.date().allow(null),
+  fechaPago: fechaDia.allow(null),
   comprobante: archivo.allow(null),
   observaciones: Joi.string().allow("", null),
 });

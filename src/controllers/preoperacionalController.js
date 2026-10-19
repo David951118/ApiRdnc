@@ -6,7 +6,7 @@ const Documento = require("../models/Documento");
 const s3Service = require("../services/s3Service");
 const logger = require("../config/logger");
 const { labelItemPreop } = require("../utils/preopLabels");
-const { rangoDias } = require("../utils/rangoFechas");
+const { rangoDias, diasCalendarioHasta } = require("../utils/rangoFechas");
 
 /**
  * Scope de preoperacionales según rol:
@@ -1074,9 +1074,8 @@ function validarDocumento(tipo, docs, entidad, errores, alertas) {
   }
 
   if (mejor.estado === "POR_VENCER" && mejor.fechaVencimiento) {
-    const hoy = new Date();
     const vence = new Date(mejor.fechaVencimiento);
-    const diasRestantes = Math.ceil((vence - hoy) / (1000 * 60 * 60 * 24));
+    const diasRestantes = diasCalendarioHasta(vence);
     const fecha = vence.toISOString().split("T")[0];
     alertas.push({
       campo: tipo,

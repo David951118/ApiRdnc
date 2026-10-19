@@ -1,4 +1,5 @@
 const Joi = require("joi");
+const fechaDia = require("./fechaDia");
 
 const createVehiculo = Joi.object({
   // Identificación
@@ -29,7 +30,7 @@ const createVehiculo = Joi.object({
   chasis: Joi.string().required(),
   cilindraje: Joi.string().allow("", null),
   capacidadPasajeros: Joi.number().min(1).required(),
-  fechaMatricula: Joi.date().required(),
+  fechaMatricula: fechaDia.required(),
 
   // Relaciones
   propietario: Joi.string()
@@ -47,7 +48,7 @@ const createVehiculo = Joi.object({
   empresaAfiliadora: Joi.string()
     .regex(/^[0-9a-fA-F]{24}$/)
     .message("ID de empresa afiliadora inválido"),
-  fechaAfiliacion: Joi.date(),
+  fechaAfiliacion: fechaDia,
 
   estado: Joi.string().valid(
     "ACTIVO",

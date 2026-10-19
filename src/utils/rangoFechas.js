@@ -70,4 +70,43 @@ function fechaDeDiaColombia(valor) {
   return isNaN(fecha.getTime()) ? null : fecha;
 }
 
-module.exports = { inicioDelDia, finDelDia, rangoDias, diaColombia, fechaDeDiaColombia };
+/**
+ * Para campos que son solo un día (vencimiento, matrícula, fecha límite...):
+ * "2026-10-20" o un instante a medianoche UTC (lo que produce Joi.date() o
+ * `new Date("2026-10-20")` en el navegador) pasa al mediodía colombiano de
+ * ese día. Así se muestra el mismo día en Colombia y en UTC.
+ */
+function fechaSoloDia(valor) {
+  if (valor === undefined || valor === null || valor === "") return null;
+  const fecha = valor instanceof Date ? valor : new Date(String(valor).trim());
+  if (isNaN(fecha.getTime())) return null;
+  const esMedianocheUTC =
+    !fecha.getUTCHours() &&
+    !fecha.getUTCMinutes() &&
+    !fecha.getUTCSeconds() &&
+    !fecha.getUTCMilliseconds();
+  if (!esMedianocheUTC) return fecha;
+  return new Date(`${fecha.toISOString().slice(0, 10)}T12:00:00.000${OFFSET_CO}`);
+}
+
+/**
+ * Días calendario colombianos de hoy a `fecha` (0 = vence hoy, -1 = venció
+ * ayer). Un documento que vence hoy sigue vigente hasta las 23:59.
+ */
+function diasCalendarioHasta(fecha, ahora = new Date()) {
+  const destino = new Date(fecha);
+  if (isNaN(destino.getTime())) return null;
+  return Math.round(
+    (Date.parse(diaColombia(destino)) - Date.parse(diaColombia(ahora))) / 86400000,
+  );
+}
+
+module.exports = {
+  inicioDelDia,
+  finDelDia,
+  rangoDias,
+  diaColombia,
+  fechaDeDiaColombia,
+  fechaSoloDia,
+  diasCalendarioHasta,
+};

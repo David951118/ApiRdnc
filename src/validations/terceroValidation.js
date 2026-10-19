@@ -1,4 +1,5 @@
 const Joi = require("joi");
+const fechaDia = require("./fechaDia");
 
 // Perfiles que inician sesión en la plataforma y por tanto deben quedar
 // enlazados a un usuario de Cellvi. El API no lo exige para CLIENTE ni
@@ -151,7 +152,7 @@ const createTercero = Joi.object({
     celular: Joi.string(),
     cargo: Joi.string(),
     area: Joi.string(),
-    fechaIngreso: Joi.date(),
+    fechaIngreso: fechaDia,
   }).allow(null),
 });
 

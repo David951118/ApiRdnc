@@ -1,4 +1,5 @@
 const Joi = require("joi");
+const fechaDia = require("./fechaDia");
 
 const objectId = Joi.string().regex(/^[0-9a-fA-F]{24}$/);
 
@@ -98,7 +99,7 @@ const createEquipo = Joi.object({
       }),
       otherwise: Joi.optional().allow("", null),
     }),
-  fechaInstalacion: Joi.date().optional(),
+  fechaInstalacion: fechaDia.optional(),
 });
 const updateEquipo = Joi.object({
   marca: objectId.optional(),

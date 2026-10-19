@@ -1,4 +1,5 @@
 const Joi = require("joi");
+const fechaDia = require("./fechaDia");
 
 const mongoId = Joi.string().regex(/^[0-9a-fA-F]{24}$/);
 
@@ -91,7 +92,7 @@ const createOrden = Joi.object({
     }),
   mecanico: mongoId.allow(null),
   taller: Joi.string().allow("", null),
-  fechaProgramada: Joi.date().allow(null),
+  fechaProgramada: fechaDia.allow(null),
   actividades: Joi.array().items(actividad),
   repuestos: Joi.array().items(repuesto),
   manoDeObra,
@@ -102,7 +103,7 @@ const updateOrden = Joi.object({
   descripcion: Joi.string(),
   prioridad: Joi.string().valid("BAJA", "MEDIA", "ALTA", "URGENTE"),
   taller: Joi.string().allow("", null),
-  fechaProgramada: Joi.date().allow(null),
+  fechaProgramada: fechaDia.allow(null),
   kilometraje: Joi.number().min(0).max(2000000).allow(null)
     .messages({
       "number.max":
@@ -116,7 +117,7 @@ const updateOrden = Joi.object({
 const asignarOrden = Joi.object({
   mecanico: mongoId.allow(null),
   taller: Joi.string().allow("", null),
-  fechaProgramada: Joi.date().allow(null),
+  fechaProgramada: fechaDia.allow(null),
 });
 
 const cerrarOrden = Joi.object({

@@ -1,4 +1,5 @@
 const Joi = require("joi");
+const fechaDia = require("./fechaDia");
 
 // Tipos válidos por entidad
 const tiposParaVehiculo = [
@@ -88,13 +89,13 @@ const createDocumento = Joi.object({
 
   entidadEmisora: Joi.string().trim().allow("", null),
 
-  fechaExpedicion: Joi.date().allow(null),
+  fechaExpedicion: fechaDia.allow(null),
 
-  fechaVencimiento: Joi.date()
+  fechaVencimiento: fechaDia
     .allow(null)
     .when("fechaExpedicion", {
       is: Joi.exist(),
-      then: Joi.date().greater(Joi.ref("fechaExpedicion")).messages({
+      then: fechaDia.greater(Joi.ref("fechaExpedicion")).messages({
         "date.greater": "fechaVencimiento debe ser posterior a fechaExpedicion",
       }),
     }),

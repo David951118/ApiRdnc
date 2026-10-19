@@ -1,4 +1,5 @@
 const Joi = require("joi");
+const fechaDia = require("./fechaDia");
 
 const mongoId = Joi.string().regex(/^[0-9a-fA-F]{24}$/);
 
@@ -39,7 +40,7 @@ const createViaje = Joi.object({
   ruta: mongoId.allow(null),
   origen: Joi.string().allow("", null),
   destino: Joi.string().allow("", null),
-  fechaProgramada: Joi.date().allow(null),
+  fechaProgramada: fechaDia.allow(null),
   kmInicio: Joi.number().min(0).allow(null),
   carga,
   entregas: Joi.array().items(entrega),
@@ -55,7 +56,7 @@ const updateViaje = Joi.object({
   ruta: mongoId.allow(null),
   origen: Joi.string().allow("", null),
   destino: Joi.string().allow("", null),
-  fechaProgramada: Joi.date().allow(null),
+  fechaProgramada: fechaDia.allow(null),
   fechaSalida: Joi.date().allow(null),
   fechaLlegada: Joi.date().allow(null),
   kmInicio: Joi.number().min(0).allow(null),

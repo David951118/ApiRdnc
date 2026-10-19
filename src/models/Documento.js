@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { diasCalendarioHasta } = require("../utils/rangoFechas");
 const { Schema } = mongoose;
 
 /**
@@ -141,9 +142,8 @@ DocumentoSchema.index({ "entidadesAsociadas.entidadId": 1 }); // "Documentos aso
 // Hook pre-save: Calcular estado automáticamente según fechaVencimiento
 DocumentoSchema.pre("save", async function () {
   if (this.fechaVencimiento && !this.isModified("estado")) {
-    const hoy = new Date();
-    const vencimiento = new Date(this.fechaVencimiento);
-    const diasRestantes = Math.ceil((vencimiento - hoy) / (1000 * 60 * 60 * 24));
+    // Por día calendario colombiano: vence hoy = sigue vigente hasta las 23:59.
+    const diasRestantes = diasCalendarioHasta(this.fechaVencimiento);
 
     if (diasRestantes < 0) {
       this.estado = "VENCIDO";
