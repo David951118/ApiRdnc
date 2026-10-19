@@ -8,7 +8,7 @@ const logger = require("../config/logger");
  *
  * Transiciones:
  *   VIGENTE / POR_VENCER → VENCIDO    (fechaVencimiento < hoy)
- *   VIGENTE              → POR_VENCER  (fechaVencimiento <= hoy + 30 días)
+ *   VIGENTE / VENCIDO    → POR_VENCER  (hoy <= fechaVencimiento <= hoy + 30 días)
  *   POR_VENCER / VENCIDO → VIGENTE     (fechaVencimiento > hoy + 30 días, corrección manual)
  *
  * No toca documentos con estado HISTORICO o RECHAZADO.
@@ -35,7 +35,8 @@ async function actualizarEstadoDocumentos() {
     const porVencer = await Documento.updateMany(
       {
         fechaVencimiento: { $gte: hoy, $lte: en30Dias },
-        estado: { $in: ["VIGENTE"] },
+        // VENCIDO también: corrige un vencimiento extendido o marcado antes de tiempo
+        estado: { $in: ["VIGENTE", "VENCIDO"] },
         deletedAt: null,
       },
       { $set: { estado: "POR_VENCER" } },
